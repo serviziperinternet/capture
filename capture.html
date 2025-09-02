@@ -1,331 +1,162 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="it">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence Capture</title>
+<title>Web Evidence – Cattura manuale</title>
 <style>
-  body{font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;background:#fff;color:#111}
-  header{display:flex;flex-wrap:wrap;gap:8px;padding:10px;border-bottom:1px solid #e5e5e5;align-items:center}
-  input[type=url],input[type=text]{padding:8px;border:1px solid #ddd;border-radius:8px}
-  input[type=url]{flex:1 1 420px}
-  button{padding:8px 10px;border:1px solid #ddd;border-radius:8px;background:#fafafa;cursor:pointer}
-  button[disabled]{opacity:.5;cursor:not-allowed}
-  label{font-size:12px;color:#333}
-  .row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
-  .grow{flex:1 1 auto}
-  #meta{font-size:12px;color:#555;padding:6px 10px;border-bottom:1px solid #f0f0f0}
-  #hint{font-size:12px;color:#777;padding:0 10px 8px}
-  #view{height:calc(100vh - 300px);overflow:auto;padding:12px}
-  #view :where(img,video,iframe){max-width:100%}
-
-  /* Viewer + fence */
-  #cropWrap{position:relative;display:none;cursor:crosshair;user-select:none;-webkit-user-select:none;touch-action:none}
-  #shotImg{max-width:none;height:auto;display:block;-webkit-user-drag:none;user-drag:none}
-  #rect{position:absolute;z-index:1000;border:2px dashed #000;background:rgba(0,0,0,.14);display:none;pointer-events:none}
-
-  /* Hidden video for screen-capture frames */
-  #feed{display:none}
+  body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0}
+  header{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid #eee;padding:10px}
+  button,input{padding:8px;border:1px solid #ddd;border-radius:8px;background:#fafafa}
+  #work{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px}
+  video,canvas{width:100%;background:#000;border-radius:8px}
+  #cropWrap{position:relative}
+  #img{max-width:100%;display:block}
+  #rect{position:absolute;border:2px dashed #000;background:rgba(0,0,0,.12);display:none;pointer-events:none}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .hint{padding:8px 10px;color:#555}
 </style>
 </head>
 <body>
-
 <header>
-  <input id="addr" class="grow" type="url" placeholder="https://… (solo per metadati)" />
-  <button id="btnStart">Condividi scheda/finestra</button>
-  <button id="btnStop"  disabled>Stop stream</button>
-  <button id="btnFrame" disabled>Scatta frame</button>
-
-  <div class="row" style="gap:8px;width:100%;margin-top:6px">
-    <button id="addSeg" disabled>Aggiungi segmento</button>
-    <label>Overlap:</label><input id="overlap" type="number" min="0" max="400" value="0" style="width:70px"> px
-    <button id="stitch" disabled>Unisci (full-page)</button>
-    <label>Zoom:</label><input id="zoom" type="range" min="50" max="200" value="100">
-    <div style="margin-left:auto"></div>
-    <label>Destinatari:</label><input id="rcpts" type="text" placeholder="a@pec.it, b@example.com" />
-    <label>Oggetto:</label><input id="subj" type="text" placeholder="Web Evidence – Screenshot" />
-    <button id="saveDrive">Salva su Drive</button>
-    <button id="saveEmail">Salva + Email</button>
+  <button id="start">Avvia cattura</button>
+  <button id="freeze" disabled>Scatta frame</button>
+  <div class="row">
+    <label>Destinatari:</label><input id="rcpts" type="text" placeholder="a@pec.it, b@example.com">
+    <label>Oggetto:</label><input id="subj" type="text" placeholder="Web Evidence – Screenshot">
   </div>
+  <button id="save" disabled>Salva su Drive</button>
+  <button id="send" disabled>Salva + Email</button>
 </header>
+<div class="hint">Suggerimento: scegli <b>Schermo intero</b> o <b>Finestra</b>, vai sul sito, chiudi cookie/login, torna qui e premi <b>Scatta frame</b>. Poi traccia la fence e salva.</div>
 
-<div id="meta"></div>
-<div id="hint">Suggerimento: apri la scheda da catturare, chiudi cookie/login, torna qui e usa “Scatta frame” o “Aggiungi segmento” per lo stitching.</div>
-
-<div id="view">
-  <div id="cropWrap">
-    <img id="shotImg" alt="screenshot">
-    <div id="rect"></div>
-  </div>
+<div id="work">
+  <div><video id="video" autoplay playsinline></video></div>
+  <div id="cropWrap"><img id="img" alt="frame"/><div id="rect"></div></div>
 </div>
 
-<!-- Hidden video to render the captured display stream -->
-<video id="feed" autoplay playsinline></video>
-
 <script>
-/*** CONFIG — Sostituisci con i tuoi valori ***/
-const WEBAPP_URL = 'https://script.google.com/macros/s/XXXXXXXXXXXX/exec'; // <-- URL Web App /exec
-const TOKEN      = 'INSERISCI_IL_TUO_TOKEN';                                 // <-- lo stesso di DATA!B7
+  // Parametri: ?app=...&t=...&u=...&to=...&subj=...
+  const Q   = new URLSearchParams(location.search);
+  const APP = Q.get('app') || '';       // URL Web App /exec
+  const TOK = Q.get('t')   || '';       // token (DATA!B7)
+  let   URLDOC = Q.get('u') || '';      // URL che stai documentando
+  if (Q.get('to'))   document.getElementById('rcpts').value = Q.get('to');
+  if (Q.get('subj')) document.getElementById('subj').value  = Q.get('subj');
 
-/*** Stato globale ***/
-let currentUrl = '';              // solo per metadati
-let stream = null;                // MediaStream da getDisplayMedia
-let lastSourceMeta = null;        // {provider:'screen-capture'|'psi'|'screenshotmachine', dimension?, request?}
-let lastCropMeta = null;          // {x,y,w,h,naturalW,naturalH}
-const SEGMENTS = [];              // array di dataURL PNG (per stitching)
+  const video = document.getElementById('video');
+  const img   = document.getElementById('img');
+  const rect  = document.getElementById('rect');
+  const wrap  = document.getElementById('cropWrap');
 
-/*** UI refs ***/
-const feed   = document.getElementById('feed');
-const addr   = document.getElementById('addr');
-const rect   = document.getElementById('rect');
-const wrap   = document.getElementById('cropWrap');
-const img    = document.getElementById('shotImg');
-const zoomEl = document.getElementById('zoom');
+  let stream = null, cropping=false, sx=0, sy=0;
 
-const btnStart = document.getElementById('btnStart');
-const btnStop  = document.getElementById('btnStop');
-const btnFrame = document.getElementById('btnFrame');
-
-const btnAddSeg = document.getElementById('addSeg');
-const btnStitch = document.getElementById('stitch');
-const overlapEl = document.getElementById('overlap');
-
-const btnSaveDrive = document.getElementById('saveDrive');
-const btnSaveEmail = document.getElementById('saveEmail');
-const rcpts = document.getElementById('rcpts');
-const subj  = document.getElementById('subj');
-
-/*** Utility UI ***/
-function setMeta(text){ document.getElementById('meta').textContent = text || ''; }
-function showError(msg){ document.getElementById('view').innerHTML = `<div style="padding:16px;color:#b00020"><b>Errore:</b> ${msg}</div>`; }
-
-/*** Fence immediata (pointer events) ***/
-(function fenceInit(){
-  let dragging=false, sx=0, sy=0;
-  function withinWrap(e){
+  // Crop UI
+  wrap.addEventListener('mousedown', e=>{
+    if (!img.src) return;
     const r = wrap.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - r.left, r.width));
-    const y = Math.max(0, Math.min(e.clientY - r.top , r.height));
-    return {x,y};
-  }
-  function onDown(e){
-    if (e.button!==0) return;
-    e.preventDefault();
-    wrap.setPointerCapture?.(e.pointerId);
-    dragging = true;
-    const p = withinWrap(e);
-    sx=p.x; sy=p.y;
+    cropping = true; sx = e.clientX - r.left; sy = e.clientY - r.top;
     Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px',display:'block'});
-    document.addEventListener('pointermove', onMove);
-    document.addEventListener('pointerup', onUp, {once:true});
-  }
-  function onMove(e){
-    if (!dragging) return;
-    const p = withinWrap(e);
-    rect.style.left   = Math.min(p.x,sx)+'px';
-    rect.style.top    = Math.min(p.y,sy)+'px';
-    rect.style.width  = Math.abs(p.x-sx)+'px';
-    rect.style.height = Math.abs(p.y-sy)+'px';
-  }
-  function onUp(){
-    dragging=false;
-    document.removeEventListener('pointermove', onMove);
-    const w = parseFloat(rect.style.width)||0, h = parseFloat(rect.style.height)||0;
-    if (w<3 && h<3){ rect.style.width='120px'; rect.style.height='80px'; }
-  }
-  wrap.addEventListener('pointerdown', onDown);
+    const move = ev=>{
+      if (!cropping) return;
+      const x = Math.max(0, Math.min(ev.clientX - r.left, r.width));
+      const y = Math.max(0, Math.min(ev.clientY - r.top,  r.height));
+      rect.style.left = Math.min(x,sx)+'px';
+      rect.style.top  = Math.min(y,sy)+'px';
+      rect.style.width  = Math.abs(x - sx)+'px';
+      rect.style.height = Math.abs(y - sy)+'px';
+    };
+    const up = ()=>{ cropping=false; document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up); };
+    document.addEventListener('mousemove', move);
+    document.addEventListener('mouseup', up);
+  });
 
-  // helper: mostra nel viewer
-  window.showShot = function(dataUrl){
-    rect.style.display='none';
-    wrap.style.display='block';
-    img.draggable=false;
-    img.addEventListener('dragstart', e=>e.preventDefault(), {once:true});
-    img.src = dataUrl;
+  // Avvia cattura
+  document.getElementById('start').onclick = async ()=>{
+    try{
+      stream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:false });
+      video.srcObject = stream;
+      document.getElementById('freeze').disabled = false;
+    }catch(e){ alert('Cattura negata: '+e.message); }
   };
 
-  // helper: zoom
-  window.setZoom = function(val){
-    const pct = Math.max(10, Math.min(400, Number(val)));
-    img.style.width = pct + '%';
+  // Scatta frame → IMG
+  document.getElementById('freeze').onclick = ()=>{
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    const cap = new ImageCapture(track);
+    cap.grabFrame().then(bm=>{
+      const c = document.createElement('canvas');
+      c.width = bm.width; c.height = bm.height;
+      c.getContext('2d').drawImage(bm, 0, 0);
+      img.src = c.toDataURL('image/png');
+      document.getElementById('save').disabled = false;
+      document.getElementById('send').disabled = false;
+    }).catch(err=> alert('Errore scatto: '+err.message));
   };
-  zoomEl.addEventListener('input', e=> setZoom(e.target.value));
 
-  // helper: crea payload ritagliato
-  window.getCropPNG = async function(){
-    if (!img.src){ alert('Nessuno screenshot caricato.'); return null; }
-    await img.decode();
-    const natW = img.naturalWidth, natH = img.naturalHeight;
-    const dispW= img.clientWidth || natW, dispH= img.clientHeight || natH;
+  function payloadFromImg(){
+    if (!img.src) return null;
+    const naturalW = img.naturalWidth, naturalH = img.naturalHeight;
+    const dispW = img.clientWidth, dispH = img.clientHeight;
 
-    const haveSel = rect.style.display!=='none' &&
-                    (parseFloat(rect.style.width)||0) > 1 &&
-                    (parseFloat(rect.style.height)||0) > 1;
+    const hasSel = rect.style.display !== 'none' &&
+                   parseFloat(rect.style.width) > 1 &&
+                   parseFloat(rect.style.height) > 1;
 
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
+    const c = document.createElement('canvas');
+    const ctx = c.getContext('2d');
 
-    if (!haveSel){
-      canvas.width=natW; canvas.height=natH;
-      ctx.drawImage(img,0,0);
-      lastCropMeta = {x:0,y:0,w:natW,h:natH,naturalW:natW,naturalH:natH};
-      return {dataUrl:canvas.toDataURL('image/png'),crop:lastCropMeta};
+    if (!hasSel) {
+      c.width = naturalW; c.height = naturalH;
+      ctx.drawImage(img, 0, 0);
+      return { dataUrl: c.toDataURL('image/png'),
+               crop: {x:0,y:0,w:naturalW,h:naturalH,naturalW,naturalH} };
     }
 
-    const scaleX=natW/dispW, scaleY=natH/dispH;
-    const rx=Math.round(parseFloat(rect.style.left)*scaleX);
-    const ry=Math.round(parseFloat(rect.style.top )*scaleY);
-    const rw=Math.round(parseFloat(rect.style.width )*scaleX);
-    const rh=Math.round(parseFloat(rect.style.height)*scaleY);
+    const scaleX = naturalW / dispW, scaleY = naturalH / dispH;
+    const rx = parseFloat(rect.style.left) * scaleX;
+    const ry = parseFloat(rect.style.top)  * scaleY;
+    const rw = parseFloat(rect.style.width)* scaleX;
+    const rh = parseFloat(rect.style.height)* scaleY;
 
-    canvas.width=Math.max(1,rw); canvas.height=Math.max(1,rh);
-    ctx.drawImage(img,rx,ry,rw,rh,0,0,canvas.width,canvas.height);
-    lastCropMeta = {x:rx,y:ry,w:rw,h:rh,naturalW:natW,naturalH:natH};
-    return {dataUrl:canvas.toDataURL('image/png'),crop:lastCropMeta};
-  };
-})();
+    c.width  = Math.max(1, Math.round(rw));
+    c.height = Math.max(1, Math.round(rh));
+    ctx.drawImage(img, rx, ry, rw, rh, 0, 0, c.width, c.height);
 
-/*** Screen capture: start/stop + singolo frame ***/
-async function startCapture(){
-  try{
-    stream = await navigator.mediaDevices.getDisplayMedia({video:true, audio:false});
-    feed.srcObject = stream;
-    btnStart.disabled = true;
-    btnStop.disabled  = false;
-    btnFrame.disabled = false;
-    btnAddSeg.disabled= false;
-    setMeta('Condivisione attiva. Torna sulla scheda sito, sistema la pagina, poi premi “Scatta frame” o “Aggiungi segmento”.');
-    lastSourceMeta = {provider:'screen-capture'};
-  }catch(e){
-    alert('Cattura rifiutata o non disponibile: ' + e.message);
+    return { dataUrl: c.toDataURL('image/png'),
+             crop: { x:Math.round(rx), y:Math.round(ry), w:c.width, h:c.height, naturalW, naturalH } };
   }
-}
-function stopCapture(){
-  try{
-    if (stream){
-      stream.getTracks().forEach(t=>t.stop());
-      stream = null;
-    }
-  }catch(_){}
-  btnStart.disabled = false;
-  btnStop.disabled  = true;
-  btnFrame.disabled = true;
-  // non disabilito addSeg/stitch per permettere stitching anche dopo
-  setMeta('');
-}
-async function captureFrame(){
-  if (!feed || !feed.videoWidth){ alert('Stream non attivo.'); return; }
-  const vw = feed.videoWidth, vh = feed.videoHeight;
-  const cv = document.createElement('canvas');
-  cv.width = vw; cv.height = vh;
-  cv.getContext('2d').drawImage(feed,0,0,vw,vh);
-  const d = cv.toDataURL('image/png');
-  showShot(d);
-  setZoom(100); zoomEl.value = 100;
-}
 
-/*** Segmenti + Stitch ***/
-btnAddSeg.addEventListener('click', async ()=>{
-  if (!feed || !feed.videoWidth){ alert('Stream non attivo.'); return; }
-  const vw = feed.videoWidth, vh = feed.videoHeight;
-  const cv = document.createElement('canvas');
-  cv.width = vw; cv.height = vh;
-  cv.getContext('2d').drawImage(feed,0,0,vw,vh);
-  const d = cv.toDataURL('image/png');
-  SEGMENTS.push(d);
-  btnStitch.disabled = SEGMENTS.length===0;
-  showShot(d);
-  setZoom(100); zoomEl.value = 100;
-  setMeta(`Segmenti: ${SEGMENTS.length}`);
-});
-btnStitch.addEventListener('click', async ()=>{
-  if (!SEGMENTS.length) return;
-  const overlap = Math.max(0, Math.min(400, parseInt(overlapEl.value||'0',10)));
-  const imgs = await Promise.all(SEGMENTS.map(src => new Promise(res=>{
-    const im = new Image(); im.onload=()=>res(im); im.src=src;
-  })));
-  const W = imgs[0].width;
-  const scaled = imgs.map(im => {
-    if (im.width===W) return {im,h:im.height};
-    const h = Math.round(im.height*(W/im.width));
-    return {im,h};
-  });
-  const totalH = scaled.reduce((acc,s,i)=>acc + (i? (s.h-overlap):s.h),0);
-  const cv = document.createElement('canvas');
-  cv.width = W; cv.height = Math.max(1,totalH);
-  const ctx = cv.getContext('2d');
-  let y=0;
-  for (let i=0;i<scaled.length;i++){
-    const s=scaled[i];
-    ctx.drawImage(s.im,0,0,s.im.width,s.im.height, 0,y,W,s.h);
-    y += (i===0 ? s.h : (s.h-overlap));
-  }
-  const stitched = cv.toDataURL('image/png');
-  showShot(stitched);
-  setZoom(100); zoomEl.value = 100;
-  lastSourceMeta = {provider:'screen-capture', dimension:'fullpage-stitch'};
-});
+  async function postToApp(sendEmail){
+    if (!APP || !TOK){ alert('Manca ?app= o ?t= nell’URL di questa pagina.'); return; }
+    const p = payloadFromImg(); if (!p){ alert('Nessuna immagine.'); return; }
 
-/*** Salvataggio verso Apps Script ***/
-async function postToWebApp(payload){
-  const res = await fetch(WEBAPP_URL, {
-    method:'POST',
-    // text/plain per evitare CORS/preflight: il corpo è una stringa JSON
-    headers:{'Content-Type':'text/plain'},
-    body: JSON.stringify(payload)
-  });
-  const obj = await res.json().catch(()=>({ok:false,error:'Risposta non JSON'}));
-  return obj;
-}
-
-async function doSave(sendEmail){
-  try{
-    currentUrl = (addr.value || '').trim(); // solo metadati
-    const cropPayload = await getCropPNG();
-    if (!cropPayload){ return; }
-    const fname = `capture_${Date.now()}.png`;
-
-    const payload = {
-      fileNameHint: fname,
-      dataUrl: cropPayload.dataUrl,         // PNG ritagliato o intero
-      authToken: TOKEN,
-      sendEmail: !!sendEmail,
-      recipients: (rcpts.value || '').trim(),
-      subject: (subj.value || '').trim(),
+    const body = {
+      authToken: TOK,
+      fileNameHint: `capture_${Date.now()}.png`,
+      dataUrl: p.dataUrl,
+      sendEmail,
+      recipients: document.getElementById('rcpts').value.trim() || undefined,
+      subject: document.getElementById('subj').value.trim() || undefined,
       meta: {
-        url: currentUrl,
-        finalUrl: currentUrl,
+        url: URLDOC || '',
+        finalUrl: URLDOC || '',
         canonical: '',
-        sourceMeta: lastSourceMeta || {provider:'screen-capture'},
-        crop: cropPayload.crop
+        sourceMeta: { provider:'screen-capture' },
+        crop: p.crop
       }
     };
 
-    const r = await postToWebApp(payload);
-    if (!r.ok) throw new Error(r.error || 'Salvataggio non riuscito');
-
-    alert(
-      (sendEmail ? 'Inviato e ' : '') +
-      `Salvato su Drive:\n${r.name}\nSHA-256: ${r.sha256}\nCartella: ${r.folderUrl}`
-    );
-  }catch(e){
-    alert('Errore salvataggio/email: ' + e.message);
+    // Content-Type: text/plain per evitare preflight CORS
+    const res = await fetch(APP, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body) });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || 'Errore backend');
+    alert((sendEmail?'Inviato e salvato.':'Salvato.') + '\nSHA-256: ' + json.sha256 + '\nCartella: ' + json.folderUrl);
   }
-}
 
-/*** Bind bottoni ***/
-btnStart.addEventListener('click', startCapture);
-btnStop .addEventListener('click', stopCapture);
-btnFrame.addEventListener('click', captureFrame);
-
-btnSaveDrive.addEventListener('click', ()=> doSave(false));
-btnSaveEmail.addEventListener('click', ()=> doSave(true));
-
-/*** Boot ***/
-window.addEventListener('load', ()=>{
-  // valori “di comodo”: puoi precompilare addr/rcpts/subj qui se vuoi
-  setZoom(100);
-});
+  document.getElementById('save').onclick = ()=> postToApp(false).catch(e=>alert(e.message||e));
+  document.getElementById('send').onclick = ()=> postToApp(true ).catch(e=>alert(e.message||e));
 </script>
 </body>
 </html>
