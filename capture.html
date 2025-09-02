@@ -222,27 +222,6 @@
 
 
 
-async function callApp(body){
-  try{
-    const res = await fetch(APP, {
-      method:'POST',
-      headers:{'Content-Type':'text/plain; charset=utf-8'},
-      body: JSON.stringify(body)
-    });
-    if(!res.ok){
-      const txt = await res.text().catch(()=> '');
-      throw new Error('HTTP ' + res.status + ' ' + res.statusText + (txt?(' – '+txt.substr(0,200)):''));
-    }
-    return await res.json();
-  }catch(e){
-    // qui vedi davvero cosa è andato storto
-    alert('Fetch errore: ' + e.message);
-    throw e;
-  }
-}
-
-const json = await callApp(body);
-
   
 </script>
 
