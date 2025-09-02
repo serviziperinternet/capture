@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – Cattura manuale</title>
+<title>Web Evidence – Cattura</title>
 <style>
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0}
   header{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid #eee;padding:10px}
@@ -14,7 +14,6 @@
   #img{max-width:100%;display:block}
   #rect{position:absolute;border:2px dashed #000;background:rgba(0,0,0,.12);display:none;pointer-events:none}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .hint{padding:8px 10px;color:#555}
 </style>
 </head>
 <body>
@@ -28,75 +27,35 @@
   <button id="save" disabled>Salva su Drive</button>
   <button id="send" disabled>Salva + Email</button>
 </header>
-<div class="hint">Suggerimento: scegli <b>Schermo intero</b> o <b>Finestra</b>, vai sul sito, chiudi cookie/login, torna qui e premi <b>Scatta frame</b>. Poi traccia la fence e salva.</div>
 
 <div id="work">
-  <div><video id="video" autoplay playsinline></video></div>
-  <div id="cropWrap"><img id="img" alt="frame"/><div id="rect"></div></div>
+  <div>
+    <video id="video" autoplay playsinline></video>
+  </div>
+  <div id="cropWrap">
+    <img id="img" alt="frame"/>
+    <div id="rect"></div>
+  </div>
 </div>
 
 <script>
-  // Parametri: ?app=...&t=...&u=...&to=...&subj=...
-  const Q   = new URLSearchParams(location.search);
-  const APP = Q.get('app') || '';       // URL Web App /exec
-  const TOK = Q.get('t')   || '';       // token (DATA!B7)
-  let   URLDOC = Q.get('u') || '';      // URL che stai documentando
-  if (Q.get('to'))   document.getElementById('rcpts').value = Q.get('to');
-  if (Q.get('subj')) document.getElementById('subj').value  = Q.get('subj');
+  // Leggi parametri: ?app=...&t=...&u=...
+  const q = new URLSearchParams(location.search);
+  const APP = q.get('app') || '';         // URL Web App /exec
+  const TOKEN = q.get('t') || '';         // deve coincidere con DATA!B7
+  let currentUrl = q.get('u') || '';      // URL che stai documentando
 
   const video = document.getElementById('video');
   const img   = document.getElementById('img');
   const rect  = document.getElementById('rect');
   const wrap  = document.getElementById('cropWrap');
 
-  let stream = null, cropping=false, sx=0, sy=0;
+  let stream = null;
+  let cropping = false, sx=0, sy=0;
 
-  // Crop UI
-  wrap.addEventListener('mousedown', e=>{
-    if (!img.src) return;
-    const r = wrap.getBoundingClientRect();
-    cropping = true; sx = e.clientX - r.left; sy = e.clientY - r.top;
-    Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px',display:'block'});
-    const move = ev=>{
-      if (!cropping) return;
-      const x = Math.max(0, Math.min(ev.clientX - r.left, r.width));
-      const y = Math.max(0, Math.min(ev.clientY - r.top,  r.height));
-      rect.style.left = Math.min(x,sx)+'px';
-      rect.style.top  = Math.min(y,sy)+'px';
-      rect.style.width  = Math.abs(x - sx)+'px';
-      rect.style.height = Math.abs(y - sy)+'px';
-    };
-    const up = ()=>{ cropping=false; document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up); };
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', up);
-  });
-
-  // Avvia cattura
-  document.getElementById('start').onclick = async ()=>{
-    try{
-      stream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:false });
-      video.srcObject = stream;
-      document.getElementById('freeze').disabled = false;
-    }catch(e){ alert('Cattura negata: '+e.message); }
-  };
-
-  // Scatta frame → IMG
-  document.getElementById('freeze').onclick = ()=>{
-    if (!stream) return;
-    const track = stream.getVideoTracks()[0];
-    const cap = new ImageCapture(track);
-    cap.grabFrame().then(bm=>{
-      const c = document.createElement('canvas');
-      c.width = bm.width; c.height = bm.height;
-      c.getContext('2d').drawImage(bm, 0, 0);
-      img.src = c.toDataURL('image/png');
-      document.getElementById('save').disabled = false;
-      document.getElementById('send').disabled = false;
-    }).catch(err=> alert('Errore scatto: '+err.message));
-  };
-
-  function payloadFromImg(){
+  function dataUrlFromImageWithCrop() {
     if (!img.src) return null;
+
     const naturalW = img.naturalWidth, naturalH = img.naturalHeight;
     const dispW = img.clientWidth, dispH = img.clientHeight;
 
@@ -120,43 +79,92 @@
     const rw = parseFloat(rect.style.width)* scaleX;
     const rh = parseFloat(rect.style.height)* scaleY;
 
-    c.width  = Math.max(1, Math.round(rw));
-    c.height = Math.max(1, Math.round(rh));
+    c.width  = Math.round(Math.max(1, rw));
+    c.height = Math.round(Math.max(1, rh));
     ctx.drawImage(img, rx, ry, rw, rh, 0, 0, c.width, c.height);
 
     return { dataUrl: c.toDataURL('image/png'),
-             crop: { x:Math.round(rx), y:Math.round(ry), w:c.width, h:c.height, naturalW, naturalH } };
+             crop: {x:Math.round(rx), y:Math.round(ry), w:c.width, h:c.height, naturalW, naturalH} };
   }
 
+  // Crop UI
+  wrap.addEventListener('mousedown', e=>{
+    if (!img.src) return;
+    const r = wrap.getBoundingClientRect();
+    cropping = true;
+    sx = e.clientX - r.left; sy = e.clientY - r.top;
+    Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px',display:'block'});
+    const onMove = ev=>{
+      if (!cropping) return;
+      const x = Math.max(0, Math.min(ev.clientX - r.left, r.width));
+      const y = Math.max(0, Math.min(ev.clientY - r.top,  r.height));
+      rect.style.left   = Math.min(x, sx) + 'px';
+      rect.style.top    = Math.min(y, sy) + 'px';
+      rect.style.width  = Math.abs(x - sx) + 'px';
+      rect.style.height = Math.abs(y - sy) + 'px';
+    };
+    const onUp = ()=>{
+      cropping = false;
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  });
+
+  // Avvia cattura
+  document.getElementById('start').onclick = async ()=>{
+    try{
+      stream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:false });
+      video.srcObject = stream;
+      document.getElementById('freeze').disabled = false;
+    }catch(e){ alert('Cattura negata: '+e); }
+  };
+
+  // Scatta frame → IMG
+  document.getElementById('freeze').onclick = ()=>{
+    if (!stream) return;
+    const track = stream.getVideoTracks()[0];
+    const imageCapture = new ImageCapture(track);
+    imageCapture.grabFrame().then(bitmap=>{
+      const c = document.createElement('canvas');
+      c.width = bitmap.width; c.height = bitmap.height;
+      c.getContext('2d').drawImage(bitmap, 0, 0);
+      img.src = c.toDataURL('image/png');
+      document.getElementById('save').disabled = false;
+      document.getElementById('send').disabled = false;
+    }).catch(err=> alert('Errore scatto: ' + err));
+  };
+
+  // Salva (o invia) al Web App
   async function postToApp(sendEmail){
-    if (!APP || !TOK){ alert('Manca ?app= o ?t= nell’URL di questa pagina.'); return; }
-    const p = payloadFromImg(); if (!p){ alert('Nessuna immagine.'); return; }
+    if(!APP || !TOKEN){ alert('Configura ?app= e ?t= nell’URL della pagina di cattura.'); return; }
+    const payload = dataUrlFromImageWithCrop(); if(!payload){ alert('Nessuna immagine.'); return; }
 
     const body = {
-      authToken: TOK,
+      authToken: TOKEN,
       fileNameHint: `capture_${Date.now()}.png`,
-      dataUrl: p.dataUrl,
+      dataUrl: payload.dataUrl,
       sendEmail,
       recipients: document.getElementById('rcpts').value.trim() || undefined,
       subject: document.getElementById('subj').value.trim() || undefined,
       meta: {
-        url: URLDOC || '',
-        finalUrl: URLDOC || '',
+        url: currentUrl || '',
+        finalUrl: currentUrl || '',
         canonical: '',
-        sourceMeta: { provider:'screen-capture' },
-        crop: p.crop
+        sourceMeta: { provider: 'screen-capture' },
+        crop: payload.crop
       }
     };
 
-    // Content-Type: text/plain per evitare preflight CORS
-    const res = await fetch(APP, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body) });
+    const res = await fetch(APP, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
     const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'Errore backend');
+    if (!json.ok) throw new Error(json.error || 'Errore sconosciuto');
     alert((sendEmail?'Inviato e salvato.':'Salvato.') + '\nSHA-256: ' + json.sha256 + '\nCartella: ' + json.folderUrl);
   }
 
-  document.getElementById('save').onclick = ()=> postToApp(false).catch(e=>alert(e.message||e));
-  document.getElementById('send').onclick = ()=> postToApp(true ).catch(e=>alert(e.message||e));
+  document.getElementById('save').onclick = ()=> postToApp(false).catch(e=>alert(e));
+  document.getElementById('send').onclick = ()=> postToApp(true).catch(e=>alert(e));
 </script>
 </body>
 </html>
