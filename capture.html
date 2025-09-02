@@ -41,8 +41,10 @@
     <label>Oggetto:</label><input id="subj" type="text" placeholder="Web Evidence – Screenshot" style="min-width:260px">
   </div>
   <button id="save" disabled>Salva PNG</button>
+  <button id="saveFull" disabled>Salva PNG (intero)</button>
   <button id="send" disabled>Salva+Email</button>
   <button id="saveVideo" disabled>Salva VIDEO</button>
+  <button id="resetSel" disabled>Reset selezione</button>
 </header>
 
 <div id="work">
@@ -53,7 +55,7 @@
   <div id="cropWrap">
     <img id="img" alt="frame"/>
     <div id="rect"></div>
-    <div class="hint">Disegna una selezione (drag) per il ritaglio. Se non selezioni, salvi l’intero frame.</div>
+    <div class="hint">Disegna una selezione (drag) per il ritaglio. <b>Click destro</b> o <b>Esc</b> per cancellarla. Se non selezioni, salvi l’intero frame.</div>
   </div>
 </div>
 
@@ -73,11 +75,20 @@
   const wrap  = document.getElementById('cropWrap');
   const addr  = document.getElementById('addr');
 
+  const btnSave     = document.getElementById('save');
+  const btnSaveFull = document.getElementById('saveFull');
+  const btnSend     = document.getElementById('send');
+  const btnResetSel = document.getElementById('resetSel');
+
   document.getElementById('rcpts').value = DEFAULT_TO;
   document.getElementById('subj').value  = DEFAULT_SUBJ || 'Web Evidence – Screenshot';
   addr.value = currentUrl;
 
   let stream = null, recorder = null, recordedChunks = [];
+
+  function enableImageActions(on){
+    btnSave.disabled = btnSaveFull.disabled = btnSend.disabled = btnResetSel.disabled = !on;
+  }
 
   /* ===== Fence migliorata (Pointer Events) ===== */
   (function initFence(){
@@ -113,18 +124,39 @@
       document.removeEventListener('pointermove', onMove);
       const w = parseFloat(rect.style.width)||0, h=parseFloat(rect.style.height)||0;
       if (w<3 && h<3) { rect.style.width='120px'; rect.style.height='80px'; } // evita “puntino”
+      btnResetSel.disabled = false;
     }
     wrap.addEventListener('pointerdown', onDown);
+
+    // reset con click destro
+    wrap.addEventListener('contextmenu', (e)=>{ e.preventDefault(); clearSelection(); });
+    // reset con ESC
+    document.addEventListener('keydown', (e)=>{ if(e.key==='Escape') clearSelection(); });
   })();
 
+  function clearSelection(){
+    rect.style.display='none';
+    rect.style.width=rect.style.height='0px';
+    btnResetSel.disabled = true;
+  }
+
+  /* ===== Util: garantire immagine pronta ===== */
+  async function ensureImageReady(){
+    if (!img.src) return false;
+    try { await img.decode(); } catch(_){}
+    return (img.naturalWidth > 0);
+  }
+
   /* ===== Util: crop → dataURL PNG ===== */
-  function dataUrlFromImageWithCrop() {
+  async function dataUrlFromImageWithCropOrFull(forceFull=false) {
     if (!img.src) return null;
+    await ensureImageReady();
 
     const naturalW = img.naturalWidth, naturalH = img.naturalHeight;
     const dispW = img.clientWidth || naturalW, dispH = img.clientHeight || naturalH;
 
-    const hasSel = rect.style.display !== 'none' &&
+    const hasSel = !forceFull &&
+                   rect.style.display !== 'none' &&
                    (parseFloat(rect.style.width)||0) > 1 &&
                    (parseFloat(rect.style.height)||0) > 1;
 
@@ -153,7 +185,7 @@
   }
 
   /* ===== Helpers fetch ===== */
-  async function appGet(params){ // GET JSON dal Web App
+  async function appGet(params){
     const url = APP + (APP.includes('?')?'&':'?') + params;
     const r = await fetch(url, { method:'GET' });
     const j = await r.json().catch(()=> ({}));
@@ -190,12 +222,10 @@
       if (!currentUrl) return alert('Inserisci URL.');
       const out = await appGet('mode=psi&u=' + encodeURIComponent(currentUrl));
       img.src = out.dataUrl;
-      // abilita salvataggi
-      document.getElementById('save').disabled = false;
-      document.getElementById('send').disabled = false;
-      // memorizza meta provider
       img.dataset.provider = 'psi';
       img.dataset.dimension = out?.meta?.mode || 'na';
+      enableImageActions(true);
+      clearSelection();
     }catch(e){ alert('PSI: ' + e.message); }
   };
 
@@ -206,10 +236,10 @@
       const dim = document.getElementById('smDim').value || '1920xfull';
       const out = await appGet('mode=sm&u=' + encodeURIComponent(currentUrl) + '&dim=' + encodeURIComponent(dim));
       img.src = out.dataUrl;
-      document.getElementById('save').disabled = false;
-      document.getElementById('send').disabled = false;
       img.dataset.provider = 'screenshotmachine';
       img.dataset.dimension = dim;
+      enableImageActions(true);
+      clearSelection();
     }catch(e){ alert('SM: ' + e.message); }
   };
 
@@ -240,22 +270,21 @@
     img.src = c.toDataURL('image/png');
     img.dataset.provider = 'screen-capture';
     img.dataset.dimension = 'na';
-    document.getElementById('save').disabled = false;
-    document.getElementById('send').disabled = false;
+    enableImageActions(true);
+    clearSelection();
   };
 
   /* ===== Recording (MediaRecorder → WebM) ===== */
+  let recorder=null, recordedChunks=[];
   document.getElementById('rec').onclick = ()=>{
     if (!stream) return alert('Avvia prima la cattura');
     recordedChunks = [];
-    try {
-      recorder = new MediaRecorder(stream, { mimeType:'video/webm;codecs=vp9' });
-    } catch(_){
-      recorder = new MediaRecorder(stream, { mimeType:'video/webm' });
-    }
+    try { recorder = new MediaRecorder(stream, { mimeType:'video/webm;codecs=vp9' }); }
+    catch(_){ recorder = new MediaRecorder(stream, { mimeType:'video/webm' }); }
     recorder.ondataavailable = e=>{ if (e.data && e.data.size>0) recordedChunks.push(e.data); };
     recorder.onstop = ()=>{ document.getElementById('saveVideo').disabled = (recordedChunks.length===0); };
     recorder.start();
+    document.getElementById('stopRec').disabled = true ? false : false; // per sicurezza
     document.getElementById('stopRec').disabled = false;
     document.getElementById('rec').disabled = true;
   };
@@ -282,7 +311,7 @@
   /* ===== Salvataggi ===== */
   document.getElementById('save').onclick = async ()=>{
     try{
-      const payload = dataUrlFromImageWithCrop(); if(!payload) return alert('Nessuna immagine');
+      const payload = await dataUrlFromImageWithCropOrFull(false); if(!payload) return alert('Nessuna immagine');
       const meta = { provider: img.dataset.provider || 'screen-capture',
                      dimension: img.dataset.dimension || 'na' };
       const out = await postPNGorWEBM(false, payload.dataUrl, meta, payload.crop);
@@ -290,9 +319,19 @@
     }catch(e){ alert(e.message); }
   };
 
+  document.getElementById('saveFull').onclick = async ()=>{
+    try{
+      const payload = await dataUrlFromImageWithCropOrFull(true); if(!payload) return alert('Nessuna immagine');
+      const meta = { provider: img.dataset.provider || 'screen-capture',
+                     dimension: img.dataset.dimension || 'na' };
+      const out = await postPNGorWEBM(false, payload.dataUrl, meta, payload.crop);
+      alert('Salvato (intero).\nSHA-256: ' + out.sha256 + '\nCartella: ' + out.folderUrl);
+    }catch(e){ alert(e.message); }
+  };
+
   document.getElementById('send').onclick = async ()=>{
     try{
-      const payload = dataUrlFromImageWithCrop(); if(!payload) return alert('Nessuna immagine');
+      const payload = await dataUrlFromImageWithCropOrFull(false); if(!payload) return alert('Nessuna immagine');
       const meta = { provider: img.dataset.provider || 'screen-capture',
                      dimension: img.dataset.dimension || 'na' };
       const out = await postPNGorWEBM(true, payload.dataUrl, meta, payload.crop);
