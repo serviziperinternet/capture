@@ -7,7 +7,7 @@
 <style>
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0}
   header{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid #eee;padding:10px}
-  button,input{padding:8px;border:1px solid #ddd;border-radius:8px;background:#fafafa}
+  button,input,select{padding:8px;border:1px solid #ddd;border-radius:8px;background:#fafafa}
   button[disabled]{opacity:.6;cursor:not-allowed}
   #work{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px}
   video,canvas{width:100%;background:#000;border-radius:8px}
@@ -15,45 +15,71 @@
   #img{max-width:100%;display:block;-webkit-user-drag:none;user-drag:none}
   #rect{position:absolute;border:2px dashed #000;background:rgba(0,0,0,.12);display:none;pointer-events:none}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .hint{font-size:12px;color:#666;padding:6px 10px;border-top:1px dashed #eee}
 </style>
 </head>
 <body>
 <header>
+  <input id="addr" type="url" placeholder="https://…" style="min-width:320px">
+  <button id="psi">PSI</button>
+  <label>SM:</label>
+  <select id="smDim">
+    <option>1366xfull</option>
+    <option selected>1920xfull</option>
+    <option>2560xfull</option>
+    <option>3840xfull</option>
+  </select>
+  <button id="sm">SM full-page</button>
+
   <button id="start">Avvia cattura</button>
   <button id="freeze" disabled>Scatta frame</button>
+  <button id="rec" disabled>REC video</button>
+  <button id="stopRec" disabled>Stop REC</button>
+
   <div class="row">
-    <label>Destinatari:</label><input id="rcpts" type="text" placeholder="a@pec.it, b@example.com">
-    <label>Oggetto:</label><input id="subj" type="text" placeholder="Web Evidence – Screenshot">
+    <label>Destinatari:</label><input id="rcpts" type="text" placeholder="a@pec.it, b@example.com" style="min-width:260px">
+    <label>Oggetto:</label><input id="subj" type="text" placeholder="Web Evidence – Screenshot" style="min-width:260px">
   </div>
-  <button id="save" disabled>Salva su Drive</button>
-  <button id="send" disabled>Salva + Email</button>
+  <button id="save" disabled>Salva PNG</button>
+  <button id="send" disabled>Salva+Email</button>
+  <button id="saveVideo" disabled>Salva VIDEO</button>
 </header>
 
 <div id="work">
   <div>
     <video id="video" autoplay playsinline></video>
+    <div class="hint">Suggerimento: scegli “Schermo intero” o “Finestra”, vai sul sito, scrolla/chiudi cookie, poi torna qui e premi “Scatta frame” o registra.</div>
   </div>
   <div id="cropWrap">
     <img id="img" alt="frame"/>
     <div id="rect"></div>
+    <div class="hint">Disegna una selezione (drag) per il ritaglio. Se non selezioni, salvi l’intero frame.</div>
   </div>
 </div>
 
 <script>
-  // Leggi parametri: ?app=...&t=...&u=...
+  /* ===== Parametri ===== */
   const q = new URLSearchParams(location.search);
-  const APP = q.get('app') || '';         // URL Web App /exec
-  const TOKEN = q.get('t') || '';         // deve coincidere con DATA!B7
-  let currentUrl = q.get('u') || '';      // URL che stai documentando
+  const APP = q.get('app') || '';             // Web App /exec
+  const TOKEN = q.get('t') || '';             // DATA!B7
+  let currentUrl = q.get('u') || '';
+  const DEFAULT_TO    = q.get('to')   || '';
+  const DEFAULT_SUBJ  = q.get('subj') || '';
 
+  /* ===== Riferimenti UI ===== */
   const video = document.getElementById('video');
   const img   = document.getElementById('img');
   const rect  = document.getElementById('rect');
   const wrap  = document.getElementById('cropWrap');
+  const addr  = document.getElementById('addr');
 
-  let stream = null;
+  document.getElementById('rcpts').value = DEFAULT_TO;
+  document.getElementById('subj').value  = DEFAULT_SUBJ || 'Web Evidence – Screenshot';
+  addr.value = currentUrl;
 
-  /* ===== Fence migliorata con Pointer Events ===== */
+  let stream = null, recorder = null, recordedChunks = [];
+
+  /* ===== Fence migliorata (Pointer Events) ===== */
   (function initFence(){
     let dragging=false, sx=0, sy=0;
     function bounds(e){
@@ -126,14 +152,72 @@
              crop: {x:rx, y:ry, w:c.width, h:c.height, naturalW, naturalH} };
   }
 
-  /* ===== Cattura: start + freeze robusto ===== */
+  /* ===== Helpers fetch ===== */
+  async function appGet(params){ // GET JSON dal Web App
+    const url = APP + (APP.includes('?')?'&':'?') + params;
+    const r = await fetch(url, { method:'GET' });
+    const j = await r.json().catch(()=> ({}));
+    if (!j.ok) throw new Error(j.error || 'Errore remoto');
+    return j;
+  }
+  async function postPNGorWEBM(sendEmail, dataUrl, sourceMeta, crop){
+    if(!APP || !TOKEN) throw new Error('Configura ?app=&t=');
+    const body = {
+      authToken: TOKEN,
+      fileNameHint: (dataUrl.startsWith('data:video')?`record_${Date.now()}.webm`:`capture_${Date.now()}.png`),
+      dataUrl,
+      sendEmail,
+      recipients: (document.getElementById('rcpts').value || '').trim() || undefined,
+      subject: (document.getElementById('subj').value || '').trim() || undefined,
+      meta: {
+        url: currentUrl || '',
+        finalUrl: currentUrl || '',
+        canonical: '',
+        sourceMeta,
+        crop: crop || null
+      }
+    };
+    const res = await fetch(APP, { method:'POST', headers:{'Content-Type':'text/plain; charset=utf-8'}, body: JSON.stringify(body) });
+    const json = await res.json();
+    if (!json.ok) throw new Error(json.error || 'Errore sconosciuto');
+    return json;
+  }
+
+  /* ===== PSI e SM Full-Page ===== */
+  document.getElementById('psi').onclick = async ()=>{
+    try{
+      currentUrl = (addr.value || currentUrl || '').trim();
+      if (!currentUrl) return alert('Inserisci URL.');
+      const out = await appGet('mode=psi&u=' + encodeURIComponent(currentUrl));
+      img.src = out.dataUrl;
+      // abilita salvataggi
+      document.getElementById('save').disabled = false;
+      document.getElementById('send').disabled = false;
+      // memorizza meta provider
+      img.dataset.provider = 'psi';
+      img.dataset.dimension = out?.meta?.mode || 'na';
+    }catch(e){ alert('PSI: ' + e.message); }
+  };
+
+  document.getElementById('sm').onclick = async ()=>{
+    try{
+      currentUrl = (addr.value || currentUrl || '').trim();
+      if (!currentUrl) return alert('Inserisci URL.');
+      const dim = document.getElementById('smDim').value || '1920xfull';
+      const out = await appGet('mode=sm&u=' + encodeURIComponent(currentUrl) + '&dim=' + encodeURIComponent(dim));
+      img.src = out.dataUrl;
+      document.getElementById('save').disabled = false;
+      document.getElementById('send').disabled = false;
+      img.dataset.provider = 'screenshotmachine';
+      img.dataset.dimension = dim;
+    }catch(e){ alert('SM: ' + e.message); }
+  };
+
+  /* ===== Cattura frame video ===== */
   async function ensureVideoReady(){
     if (!video.srcObject) return false;
     if (video.readyState >= 2 && video.videoWidth > 0) return true;
-    await new Promise(res=>{
-      const onMeta=()=>{ video.removeEventListener('loadedmetadata', onMeta); res(); };
-      video.addEventListener('loadedmetadata', onMeta);
-    });
+    await new Promise(res=> video.addEventListener('loadedmetadata', ()=>res(), {once:true}));
     return video.videoWidth > 0;
   }
 
@@ -142,83 +226,81 @@
       stream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:false });
       video.srcObject = stream;
       await video.play();
-      const ok = await ensureVideoReady();
-      if (!ok) throw new Error('Stream video non pronto');
+      await ensureVideoReady();
       document.getElementById('freeze').disabled = false;
-    }catch(e){
-      alert('Cattura negata o non disponibile: ' + (e.message||e));
-    }
+      document.getElementById('rec').disabled = false;
+    }catch(e){ alert('Cattura negata: ' + (e.message||e)); }
   };
 
-  // Freeze – prima provo drawImage(video), fallback a ImageCapture
   document.getElementById('freeze').onclick = async ()=>{
-    if (!stream || !video.videoWidth){
-      alert('Stream non attivo.');
-      return;
-    }
-    try {
-      const vw = video.videoWidth, vh = video.videoHeight;
-      const c = document.createElement('canvas');
-      c.width = vw; c.height = vh;
-      const ctx = c.getContext('2d');
-      ctx.drawImage(video, 0, 0, vw, vh);
-      const dataUrl = c.toDataURL('image/png');
-      if (dataUrl && dataUrl.length > 100) {
-        img.src = dataUrl;
-      } else {
-        throw new Error('drawImage ha restituito un frame vuoto');
-      }
-    } catch (_e) {
-      try {
-        const track = stream.getVideoTracks()[0];
-        const ic = new ImageCapture(track);
-        const bmp = await ic.grabFrame();
-        const c = document.createElement('canvas');
-        c.width = bmp.width; c.height = bmp.height;
-        c.getContext('2d').drawImage(bmp, 0, 0);
-        img.src = c.toDataURL('image/png');
-      } catch (e2) {
-        alert('Errore scatto: ' + (e2.message||e2));
-        return;
-      }
-    }
+    if (!stream || !video.videoWidth) return alert('Stream non attivo');
+    const c = document.createElement('canvas');
+    c.width = video.videoWidth; c.height = video.videoHeight;
+    c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+    img.src = c.toDataURL('image/png');
+    img.dataset.provider = 'screen-capture';
+    img.dataset.dimension = 'na';
     document.getElementById('save').disabled = false;
     document.getElementById('send').disabled = false;
   };
 
-  /* ===== Invio a Web App (CORS-safe: text/plain) ===== */
-  async function postToApp(sendEmail){
-    if(!APP || !TOKEN){ alert('Configura ?app= e ?t= nell’URL della pagina di cattura.'); return; }
-    const payload = dataUrlFromImageWithCrop(); if(!payload){ alert('Nessuna immagine.'); return; }
+  /* ===== Recording (MediaRecorder → WebM) ===== */
+  document.getElementById('rec').onclick = ()=>{
+    if (!stream) return alert('Avvia prima la cattura');
+    recordedChunks = [];
+    try {
+      recorder = new MediaRecorder(stream, { mimeType:'video/webm;codecs=vp9' });
+    } catch(_){
+      recorder = new MediaRecorder(stream, { mimeType:'video/webm' });
+    }
+    recorder.ondataavailable = e=>{ if (e.data && e.data.size>0) recordedChunks.push(e.data); };
+    recorder.onstop = ()=>{ document.getElementById('saveVideo').disabled = (recordedChunks.length===0); };
+    recorder.start();
+    document.getElementById('stopRec').disabled = false;
+    document.getElementById('rec').disabled = true;
+  };
 
-    const body = {
-      authToken: TOKEN,
-      fileNameHint: `capture_${Date.now()}.png`,
-      dataUrl: payload.dataUrl,
-      sendEmail,
-      recipients: document.getElementById('rcpts').value.trim() || undefined,
-      subject: document.getElementById('subj').value.trim() || undefined,
-      meta: {
-        url: currentUrl || '',
-        finalUrl: currentUrl || '',
-        canonical: '',
-        sourceMeta: { provider: 'screen-capture' },
-        crop: payload.crop
-      }
-    };
+  document.getElementById('stopRec').onclick = ()=>{
+    try { recorder && recorder.stop(); } catch(_){}
+    document.getElementById('rec').disabled = false;
+    document.getElementById('stopRec').disabled = true;
+  };
 
-    const res = await fetch(APP, {
-      method:'POST',
-      headers:{'Content-Type':'text/plain; charset=utf-8'},
-      body: JSON.stringify(body)
+  async function saveRecordedVideo(sendEmail){
+    if (!recordedChunks.length) return alert('Nessuna registrazione.');
+    const blob = new Blob(recordedChunks, { type:'video/webm' });
+    const dataUrl = await new Promise(res=>{
+      const fr = new FileReader();
+      fr.onload = ()=> res(fr.result);
+      fr.readAsDataURL(blob);
     });
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'Errore sconosciuto');
-    alert((sendEmail?'Inviato e salvato.':'Salvato.') + '\nSHA-256: ' + json.sha256 + '\nCartella: ' + json.folderUrl);
+    const out = await postPNGorWEBM(!!sendEmail, dataUrl, { provider:'screen-record' }, null);
+    alert((sendEmail?'Video inviato e salvato.':'Video salvato.')
+          + '\nSHA-256: ' + out.sha256 + '\nCartella: ' + out.folderUrl);
   }
 
-  document.getElementById('save').onclick = ()=> postToApp(false).catch(e=>alert(e));
-  document.getElementById('send').onclick = ()=> postToApp(true).catch(e=>alert(e));
+  /* ===== Salvataggi ===== */
+  document.getElementById('save').onclick = async ()=>{
+    try{
+      const payload = dataUrlFromImageWithCrop(); if(!payload) return alert('Nessuna immagine');
+      const meta = { provider: img.dataset.provider || 'screen-capture',
+                     dimension: img.dataset.dimension || 'na' };
+      const out = await postPNGorWEBM(false, payload.dataUrl, meta, payload.crop);
+      alert('Salvato.\nSHA-256: ' + out.sha256 + '\nCartella: ' + out.folderUrl);
+    }catch(e){ alert(e.message); }
+  };
+
+  document.getElementById('send').onclick = async ()=>{
+    try{
+      const payload = dataUrlFromImageWithCrop(); if(!payload) return alert('Nessuna immagine');
+      const meta = { provider: img.dataset.provider || 'screen-capture',
+                     dimension: img.dataset.dimension || 'na' };
+      const out = await postPNGorWEBM(true, payload.dataUrl, meta, payload.crop);
+      alert('Inviato e salvato.\nSHA-256: ' + out.sha256 + '\nCartella: ' + out.folderUrl);
+    }catch(e){ alert(e.message); }
+  };
+
+  document.getElementById('saveVideo').onclick = ()=> saveRecordedVideo(false).catch(e=>alert(e.message||e));
 </script>
 </body>
 </html>
