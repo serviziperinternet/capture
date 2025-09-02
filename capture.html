@@ -1,162 +1,332 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="it">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – Cattura manuale</title>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Web Evidence – Cattura</title>
 <style>
-  body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0}
-  header{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid #eee;padding:10px}
-  button,input{padding:8px;border:1px solid #ddd;border-radius:8px;background:#fafafa}
-  #work{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px}
-  video,canvas{width:100%;background:#000;border-radius:8px}
-  #cropWrap{position:relative}
-  #img{max-width:100%;display:block}
-  #rect{position:absolute;border:2px dashed #000;background:rgba(0,0,0,.12);display:none;pointer-events:none}
-  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .hint{padding:8px 10px;color:#555}
+  :root { --pad:10px; --b:#e5e5e5; --mut:#777; }
+  * { box-sizing: border-box; }
+  body { font:14px/1.5 system-ui,-apple-system,Segoe UI,Roboto,Arial; margin:0; }
+  header { display:flex; flex-wrap:wrap; gap:8px; padding:10px; border-bottom:1px solid var(--b); align-items:center; }
+  button, select, input[type="text"] {
+    padding:8px 10px; border:1px solid var(--b); border-radius:8px; background:#fafafa; cursor:pointer;
+  }
+  input[type="text"] { min-width:260px; }
+  #hint { font-size:12px; color:var(--mut); padding:0 var(--pad) 8px; }
+  #stage { padding:12px; height:calc(100vh - 200px); overflow:auto; }
+  #wrap { position:relative; display:none; user-select:none; -webkit-user-select:none; touch-action:none; }
+  #shot { display:block; height:auto; max-width:none; -webkit-user-drag:none; user-drag:none; }
+  #rect { position:absolute; border:2px dashed #000; background:rgba(0,0,0,.12); display:none; pointer-events:none; }
+  #previewNote { font-size:12px; color:var(--mut); padding:6px var(--pad) 0; }
+  .sp { flex:1 1 16px }
+  .badge { font:12px/1.8 monospace; background:#f3f3f3; border:1px solid var(--b); border-radius:6px; padding:2px 6px; }
 </style>
 </head>
 <body>
-<header>
-  <button id="start">Avvia cattura</button>
-  <button id="freeze" disabled>Scatta frame</button>
-  <div class="row">
+  <header>
+    <button id="btnStart">Avvia cattura</button>
+    <button id="btnGrab" disabled>Scatta frame</button>
+    <span class="sp"></span>
+    <label>Zoom:</label>
+    <input id="zoom" type="range" min="50" max="200" value="100" />
+    <span id="zoomVal" class="badge">100%</span>
+    <span class="sp"></span>
+    <button id="btnAdd" disabled>Aggiungi segmento</button>
+    <button id="btnClear" disabled>Reset segmenti</button>
+    <button id="btnAssemble" disabled>Unisci (full-page)</button>
+    <span class="sp"></span>
     <label>Destinatari:</label><input id="rcpts" type="text" placeholder="a@pec.it, b@example.com">
-    <label>Oggetto:</label><input id="subj" type="text" placeholder="Web Evidence – Screenshot">
-  </div>
-  <button id="save" disabled>Salva su Drive</button>
-  <button id="send" disabled>Salva + Email</button>
-</header>
-<div class="hint">Suggerimento: scegli <b>Schermo intero</b> o <b>Finestra</b>, vai sul sito, chiudi cookie/login, torna qui e premi <b>Scatta frame</b>. Poi traccia la fence e salva.</div>
+    <label>Oggetto:</label><input id="subj" type="text" value="Web Evidence – Screenshot">
+    <button id="btnSave" disabled>Salva su Drive</button>
+    <button id="btnSend" disabled>Salva + Email</button>
+  </header>
 
-<div id="work">
-  <div><video id="video" autoplay playsinline></video></div>
-  <div id="cropWrap"><img id="img" alt="frame"/><div id="rect"></div></div>
-</div>
+  <div id="hint">
+    Suggerimento: scegli Schermo intero oppure Finestra nel prompt del browser, vai sulla scheda del sito, chiudi cookie/login, torna qui e premi <b>Scatta frame</b>.
+    Traccia la fence, <b>Aggiungi segmento</b> (puoi scrollare la pagina e ripetere), quindi <b>Unisci (full-page)</b> per ottenere l’immagine completa.
+  </div>
+
+  <div id="stage">
+    <div id="wrap">
+      <img id="shot" alt="frame">
+      <div id="rect"></div>
+    </div>
+  </div>
+  <div id="previewNote"></div>
 
 <script>
-  // Parametri: ?app=...&t=...&u=...&to=...&subj=...
-  const Q   = new URLSearchParams(location.search);
-  const APP = Q.get('app') || '';       // URL Web App /exec
-  const TOK = Q.get('t')   || '';       // token (DATA!B7)
-  let   URLDOC = Q.get('u') || '';      // URL che stai documentando
-  if (Q.get('to'))   document.getElementById('rcpts').value = Q.get('to');
-  if (Q.get('subj')) document.getElementById('subj').value  = Q.get('subj');
+/* ===== Config via querystring =====
+   ?app=URL_WEBAPP_APPS_SCRIPT&t=TOKEN&to=destinatari&subj=oggetto
+*/
+const qs = new URLSearchParams(location.search);
+const APP_URL = qs.get('app') || '';
+const TOKEN   = qs.get('t')   || '';
+const DEF_TO  = qs.get('to')  || '';
+const DEF_SUB = qs.get('subj')|| '';
 
-  const video = document.getElementById('video');
-  const img   = document.getElementById('img');
-  const rect  = document.getElementById('rect');
-  const wrap  = document.getElementById('cropWrap');
+const el = (id)=>document.getElementById(id);
 
-  let stream = null, cropping=false, sx=0, sy=0;
+const btnStart = el('btnStart');
+const btnGrab  = el('btnGrab');
+const btnAdd   = el('btnAdd');
+const btnClear = el('btnClear');
+const btnAssem = el('btnAssemble');
+const btnSave  = el('btnSave');
+const btnSend  = el('btnSend');
+const zoom     = el('zoom');
+const zoomVal  = el('zoomVal');
+const rcpts    = el('rcpts');
+const subj     = el('subj');
+const stage    = el('stage');
+const wrap     = el('wrap');
+const shot     = el('shot');
+const rect     = el('rect');
+const note     = el('previewNote');
 
-  // Crop UI
-  wrap.addEventListener('mousedown', e=>{
-    if (!img.src) return;
-    const r = wrap.getBoundingClientRect();
-    cropping = true; sx = e.clientX - r.left; sy = e.clientY - r.top;
-    Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px',display:'block'});
-    const move = ev=>{
-      if (!cropping) return;
-      const x = Math.max(0, Math.min(ev.clientX - r.left, r.width));
-      const y = Math.max(0, Math.min(ev.clientY - r.top,  r.height));
-      rect.style.left = Math.min(x,sx)+'px';
-      rect.style.top  = Math.min(y,sy)+'px';
-      rect.style.width  = Math.abs(x - sx)+'px';
-      rect.style.height = Math.abs(y - sy)+'px';
-    };
-    const up = ()=>{ cropping=false; document.removeEventListener('mousemove',move); document.removeEventListener('mouseup',up); };
-    document.addEventListener('mousemove', move);
-    document.addEventListener('mouseup', up);
-  });
+rcpts.value = DEF_TO;
+if (DEF_SUB) subj.value = DEF_SUB;
 
-  // Avvia cattura
-  document.getElementById('start').onclick = async ()=>{
-    try{
-      stream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:false });
-      video.srcObject = stream;
-      document.getElementById('freeze').disabled = false;
-    }catch(e){ alert('Cattura negata: '+e.message); }
+let stream = null;             // MediaStream
+let lastBitmap = null;         // ImageBitmap del frame catturato
+let naturalW = 0, naturalH = 0;
+let sel = null;                // selezione corrente (px naturali)
+let dragging = false, sx=0, sy=0;
+let segments = [];             // [{img:ImageBitmap, crop:{x,y,w,h}}...]
+
+/* ===== Screen capture ===== */
+
+btnStart.onclick = async ()=>{
+  try{
+    stream = await navigator.mediaDevices.getDisplayMedia({
+      video: { displaySurface: "browser" },
+      selfBrowserSurface: "include",
+      preferCurrentTab: false
+    });
+    btnGrab.disabled = false;
+    info('Condivisione avviata: torna sulla scheda del sito, sistema cookie/login, poi qui → Scatta frame.');
+  }catch(e){
+    warn('Cattura non concessa: ' + e.message);
+  }
+};
+
+btnGrab.onclick = async ()=>{
+  if(!stream){ warn('Avvia prima la cattura.'); return; }
+  // acquisisci un frame dalla traccia video
+  const [track] = stream.getVideoTracks();
+  const imageCapture = new ImageCapture(track);
+  const bitmap = await imageCapture.grabFrame();
+  lastBitmap = bitmap;
+  naturalW = bitmap.width;
+  naturalH = bitmap.height;
+
+  // disegna in un canvas → dataURL → <img>
+  const c = document.createElement('canvas');
+  c.width = naturalW; c.height = naturalH;
+  c.getContext('2d').drawImage(bitmap, 0, 0);
+  shot.src = c.toDataURL('image/png');
+  wrap.style.display = 'block';
+  rect.style.display = 'none';
+  sel = null;
+
+  btnAdd.disabled = false;
+  btnSave.disabled = false;
+  btnSend.disabled = false;
+
+  setZoom(zoom.value);
+  enableFence();
+  info(`Frame acquisito: ${naturalW}×${naturalH}px. Traccia la fence e premi “Aggiungi segmento” (o salva direttamente).`);
+};
+
+/* ===== Fence robusta (drag continuo, document-level) ===== */
+
+function enableFence(){
+  wrap.onpointerdown = null;
+  wrap.onpointermove = null;
+  wrap.onpointerup   = null;
+
+  wrap.style.cursor = 'crosshair';
+  wrap.onpointerdown = (e)=>{
+    if(e.button!==0) return;
+    e.preventDefault();
+    wrap.setPointerCapture?.(e.pointerId);
+    dragging = true;
+    const p = relToImg(e.clientX, e.clientY);
+    sx = p.xd; sy = p.yd;
+    Object.assign(rect.style, { left: p.xd+'px', top: p.yd+'px', width:'0px', height:'0px', display:'block' });
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp, { once:true });
   };
+}
 
-  // Scatta frame → IMG
-  document.getElementById('freeze').onclick = ()=>{
-    if (!stream) return;
-    const track = stream.getVideoTracks()[0];
-    const cap = new ImageCapture(track);
-    cap.grabFrame().then(bm=>{
-      const c = document.createElement('canvas');
-      c.width = bm.width; c.height = bm.height;
-      c.getContext('2d').drawImage(bm, 0, 0);
-      img.src = c.toDataURL('image/png');
-      document.getElementById('save').disabled = false;
-      document.getElementById('send').disabled = false;
-    }).catch(err=> alert('Errore scatto: '+err.message));
+function onMove(e){
+  if(!dragging) return;
+  const p = relToImg(e.clientX, e.clientY);
+  rect.style.left   = Math.min(p.xd, sx) + 'px';
+  rect.style.top    = Math.min(p.yd, sy) + 'px';
+  rect.style.width  = Math.abs(p.xd - sx) + 'px';
+  rect.style.height = Math.abs(p.yd - sy) + 'px';
+}
+
+function onUp(){
+  dragging = false;
+  document.removeEventListener('pointermove', onMove);
+  const w = parseFloat(rect.style.width)||0;
+  const h = parseFloat(rect.style.height)||0;
+  if(w < 3 && h < 3){
+    rect.style.width = '200px';
+    rect.style.height= '120px';
+  }
+  sel = selectionToNatural();
+}
+
+/* coordinate display→natural con zoom */
+function relToImg(clientX, clientY){
+  const r = shot.getBoundingClientRect();
+  // clamp entro l'immagine
+  const xd = Math.max(0, Math.min(clientX - r.left, r.width));
+  const yd = Math.max(0, Math.min(clientY - r.top , r.height));
+  return { xd, yd, r };
+}
+
+function selectionToNatural(){
+  const r = shot.getBoundingClientRect();
+  const dispW = r.width, dispH = r.height;
+  const scaleX = naturalW / dispW, scaleY = naturalH / dispH;
+
+  const left = parseFloat(rect.style.left)||0;
+  const top  = parseFloat(rect.style.top)||0;
+  const w    = Math.max(1, parseFloat(rect.style.width)||naturalW);
+  const h    = Math.max(1, parseFloat(rect.style.height)||naturalH);
+
+  return {
+    x: Math.round(left * scaleX),
+    y: Math.round(top  * scaleY),
+    w: Math.round(w    * scaleX),
+    h: Math.round(h    * scaleY)
   };
+}
 
-  function payloadFromImg(){
-    if (!img.src) return null;
-    const naturalW = img.naturalWidth, naturalH = img.naturalHeight;
-    const dispW = img.clientWidth, dispH = img.clientHeight;
+/* ===== Zoom ===== */
+zoom.oninput = e => setZoom(e.target.value);
+function setZoom(val){
+  const pct = Math.max(50, Math.min(200, Number(val)||100));
+  zoomVal.textContent = pct + '%';
+  if(shot) shot.style.width = pct + '%';
+}
 
-    const hasSel = rect.style.display !== 'none' &&
-                   parseFloat(rect.style.width) > 1 &&
-                   parseFloat(rect.style.height) > 1;
+/* ===== Segmenti & full-page ===== */
 
-    const c = document.createElement('canvas');
-    const ctx = c.getContext('2d');
+btnAdd.onclick = async ()=>{
+  if(!lastBitmap){ warn('Nessun frame.'); return; }
+  const crop = sel || { x:0, y:0, w:naturalW, h:naturalH };
+  // ritaglia in un offscreen canvas
+  const c = document.createElement('canvas');
+  c.width = crop.w; c.height = crop.h;
+  const ctx = c.getContext('2d');
+  ctx.drawImage(lastBitmap, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
 
-    if (!hasSel) {
-      c.width = naturalW; c.height = naturalH;
-      ctx.drawImage(img, 0, 0);
-      return { dataUrl: c.toDataURL('image/png'),
-               crop: {x:0,y:0,w:naturalW,h:naturalH,naturalW,naturalH} };
-    }
+  const bm = await createImageBitmap(c);
+  segments.push({ img: bm, crop: { ...crop } });
 
-    const scaleX = naturalW / dispW, scaleY = naturalH / dispH;
-    const rx = parseFloat(rect.style.left) * scaleX;
-    const ry = parseFloat(rect.style.top)  * scaleY;
-    const rw = parseFloat(rect.style.width)* scaleX;
-    const rh = parseFloat(rect.style.height)* scaleY;
+  btnClear.disabled = segments.length === 0;
+  btnAssem.disabled = segments.length < 2;
 
-    c.width  = Math.max(1, Math.round(rw));
-    c.height = Math.max(1, Math.round(rh));
-    ctx.drawImage(img, rx, ry, rw, rh, 0, 0, c.width, c.height);
+  info(`Segmento aggiunto (${crop.w}×${crop.h}). Totale segmenti: ${segments.length}. Ora scrolla il sito, “Scatta frame”, traccia fence e “Aggiungi segmento” di nuovo.`);
+};
 
-    return { dataUrl: c.toDataURL('image/png'),
-             crop: { x:Math.round(rx), y:Math.round(ry), w:c.width, h:c.height, naturalW, naturalH } };
+btnClear.onclick = ()=>{
+  segments = [];
+  btnClear.disabled = true;
+  btnAssem.disabled = true;
+  info('Segmenti azzerati.');
+};
+
+btnAssem.onclick = async ()=>{
+  if(segments.length < 2){ warn('Servono almeno 2 segmenti.'); return; }
+  // calcola dimensioni output (larghezza massima, altezza somma)
+  const outW = Math.max(...segments.map(s => s.crop.w));
+  const outH = segments.reduce((acc,s)=> acc + s.crop.h, 0);
+  const canvas = document.createElement('canvas');
+  canvas.width = outW; canvas.height = outH;
+  const ctx = canvas.getContext('2d');
+
+  let y = 0;
+  for(const s of segments){
+    const src = s.img;
+    // centra se larghezze diverse
+    const dx = Math.round((outW - s.crop.w)/2);
+    ctx.drawImage(src, 0, 0, s.crop.w, s.crop.h, dx, y, s.crop.w, s.crop.h);
+    y += s.crop.h;
   }
 
-  async function postToApp(sendEmail){
-    if (!APP || !TOK){ alert('Manca ?app= o ?t= nell’URL di questa pagina.'); return; }
-    const p = payloadFromImg(); if (!p){ alert('Nessuna immagine.'); return; }
+  // mostra risultato
+  shot.src = canvas.toDataURL('image/png');
+  wrap.style.display = 'block';
+  rect.style.display = 'none';
+  lastBitmap = await createImageBitmap(canvas);
+  naturalW = canvas.width; naturalH = canvas.height;
+  sel = { x:0, y:0, w:naturalW, h:naturalH };
+  setZoom(100);
+  info(`Assemblato full-page: ${naturalW}×${naturalH}. Ora puoi salvare o inviare email.`);
+};
 
-    const body = {
-      authToken: TOK,
-      fileNameHint: `capture_${Date.now()}.png`,
-      dataUrl: p.dataUrl,
-      sendEmail,
-      recipients: document.getElementById('rcpts').value.trim() || undefined,
-      subject: document.getElementById('subj').value.trim() || undefined,
-      meta: {
-        url: URLDOC || '',
-        finalUrl: URLDOC || '',
-        canonical: '',
-        sourceMeta: { provider:'screen-capture' },
-        crop: p.crop
-      }
-    };
+/* ===== Salva / Invia ===== */
 
-    // Content-Type: text/plain per evitare preflight CORS
-    const res = await fetch(APP, { method:'POST', headers:{'Content-Type':'text/plain;charset=utf-8'}, body: JSON.stringify(body) });
-    const json = await res.json();
-    if (!json.ok) throw new Error(json.error || 'Errore backend');
-    alert((sendEmail?'Inviato e salvato.':'Salvato.') + '\nSHA-256: ' + json.sha256 + '\nCartella: ' + json.folderUrl);
+btnSave.onclick = ()=>postImage(false);
+btnSend.onclick = ()=>postImage(true);
+
+async function getPNGDataUrlCurrentSelection(){
+  if(!lastBitmap){ warn('Nessun frame.'); return null; }
+  const crop = sel || { x:0, y:0, w:naturalW, h:naturalH };
+  const c = document.createElement('canvas');
+  c.width = crop.w; c.height = crop.h;
+  c.getContext('2d').drawImage(lastBitmap, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
+  return { dataUrl: c.toDataURL('image/png'), crop };
+}
+
+async function postImage(sendEmail){
+  if(!APP_URL || !TOKEN){
+    alert('Config mancante: app= e t= nel link.');
+    return;
   }
+  const payload = await getPNGDataUrlCurrentSelection();
+  if(!payload) return;
 
-  document.getElementById('save').onclick = ()=> postToApp(false).catch(e=>alert(e.message||e));
-  document.getElementById('send').onclick = ()=> postToApp(true ).catch(e=>alert(e.message||e));
+  const meta = {
+    url: document.referrer || '',   // opzionale
+    finalUrl: document.referrer || '',
+    canonical: '',
+    sourceMeta: { provider: 'screen-capture', dimension: `${naturalW}x${naturalH}` },
+    crop: payload.crop,
+    authToken: TOKEN
+  };
+  const body = {
+    fileNameHint: `capture_${Date.now()}.png`,
+    dataUrl: payload.dataUrl,
+    meta,
+    sendEmail,
+    recipients: rcpts.value || '',
+    subject: subj.value || ''
+  };
+
+  try{
+    const res = await fetch(APP_URL, {
+      method:'POST',
+      headers: { 'Content-Type':'text/plain' }, // niente preflight
+      body: JSON.stringify(body)
+    });
+    const obj = await res.json();
+    if(!obj.ok){ throw new Error(obj.error||'Errore salvataggio'); }
+    alert(`OK: ${obj.name}\nSHA-256: ${obj.sha256}\nCartella: ${obj.folderUrl}${sendEmail?'\nEmail a: '+(obj.emailedTo||'') : ''}`);
+  }catch(e){
+    alert('Errore: ' + e.message);
+  }
+}
+
+/* ===== Util ===== */
+function info(m){ note.textContent = m; note.style.color = '#555'; }
+function warn(m){ note.textContent = m; note.style.color = '#b00020'; }
 </script>
 </body>
 </html>
