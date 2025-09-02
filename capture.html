@@ -8,10 +8,11 @@
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0}
   header{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid #eee;padding:10px}
   button,input{padding:8px;border:1px solid #ddd;border-radius:8px;background:#fafafa}
+  button[disabled]{opacity:.6;cursor:not-allowed}
   #work{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px}
   video,canvas{width:100%;background:#000;border-radius:8px}
-  #cropWrap{position:relative}
-  #img{max-width:100%;display:block}
+  #cropWrap{position:relative;user-select:none;-webkit-user-select:none}
+  #img{max-width:100%;display:block;-webkit-user-drag:none;user-drag:none}
   #rect{position:absolute;border:2px dashed #000;background:rgba(0,0,0,.12);display:none;pointer-events:none}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
 </style>
@@ -51,17 +52,56 @@
   const wrap  = document.getElementById('cropWrap');
 
   let stream = null;
-  let cropping = false, sx=0, sy=0;
 
+  /* ===== Fence migliorata con Pointer Events ===== */
+  (function initFence(){
+    let dragging=false, sx=0, sy=0;
+
+    function bounds(e){
+      const r = wrap.getBoundingClientRect();
+      const x = Math.max(0, Math.min(e.clientX - r.left, r.width));
+      const y = Math.max(0, Math.min(e.clientY - r.top , r.height));
+      return {x,y};
+    }
+    function onDown(e){
+      if (!img.src) return;
+      if (e.button!==0 && e.pointerType==='mouse') return;
+      e.preventDefault();
+      wrap.setPointerCapture?.(e.pointerId);
+      dragging = true;
+      const p = bounds(e);
+      sx=p.x; sy=p.y;
+      Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px',display:'block'});
+      document.addEventListener('pointermove', onMove);
+      document.addEventListener('pointerup', onUp, {once:true});
+    }
+    function onMove(e){
+      if(!dragging) return;
+      const p = bounds(e);
+      rect.style.left   = Math.min(p.x, sx) + 'px';
+      rect.style.top    = Math.min(p.y, sy) + 'px';
+      rect.style.width  = Math.abs(p.x - sx) + 'px';
+      rect.style.height = Math.abs(p.y - sy) + 'px';
+    }
+    function onUp(){
+      dragging=false;
+      document.removeEventListener('pointermove', onMove);
+      const w = parseFloat(rect.style.width)||0, h=parseFloat(rect.style.height)||0;
+      if (w<3 && h<3) { rect.style.width='120px'; rect.style.height='80px'; } // evita “puntino”
+    }
+    wrap.addEventListener('pointerdown', onDown);
+  })();
+
+  /* ===== Util: crop → dataURL PNG ===== */
   function dataUrlFromImageWithCrop() {
     if (!img.src) return null;
 
     const naturalW = img.naturalWidth, naturalH = img.naturalHeight;
-    const dispW = img.clientWidth, dispH = img.clientHeight;
+    const dispW = img.clientWidth || naturalW, dispH = img.clientHeight || naturalH;
 
     const hasSel = rect.style.display !== 'none' &&
-                   parseFloat(rect.style.width) > 1 &&
-                   parseFloat(rect.style.height) > 1;
+                   (parseFloat(rect.style.width)||0) > 1 &&
+                   (parseFloat(rect.style.height)||0) > 1;
 
     const c = document.createElement('canvas');
     const ctx = c.getContext('2d');
@@ -74,69 +114,83 @@
     }
 
     const scaleX = naturalW / dispW, scaleY = naturalH / dispH;
-    const rx = parseFloat(rect.style.left) * scaleX;
-    const ry = parseFloat(rect.style.top)  * scaleY;
-    const rw = parseFloat(rect.style.width)* scaleX;
-    const rh = parseFloat(rect.style.height)* scaleY;
+    const rx = Math.round(parseFloat(rect.style.left) * scaleX);
+    const ry = Math.round(parseFloat(rect.style.top)  * scaleY);
+    const rw = Math.round(parseFloat(rect.style.width)* scaleX);
+    const rh = Math.round(parseFloat(rect.style.height)* scaleY);
 
-    c.width  = Math.round(Math.max(1, rw));
-    c.height = Math.round(Math.max(1, rh));
+    c.width  = Math.max(1, rw);
+    c.height = Math.max(1, rh);
     ctx.drawImage(img, rx, ry, rw, rh, 0, 0, c.width, c.height);
 
     return { dataUrl: c.toDataURL('image/png'),
-             crop: {x:Math.round(rx), y:Math.round(ry), w:c.width, h:c.height, naturalW, naturalH} };
+             crop: {x:rx, y:ry, w:c.width, h:c.height, naturalW, naturalH} };
   }
 
-  // Crop UI
-  wrap.addEventListener('mousedown', e=>{
-    if (!img.src) return;
-    const r = wrap.getBoundingClientRect();
-    cropping = true;
-    sx = e.clientX - r.left; sy = e.clientY - r.top;
-    Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px',display:'block'});
-    const onMove = ev=>{
-      if (!cropping) return;
-      const x = Math.max(0, Math.min(ev.clientX - r.left, r.width));
-      const y = Math.max(0, Math.min(ev.clientY - r.top,  r.height));
-      rect.style.left   = Math.min(x, sx) + 'px';
-      rect.style.top    = Math.min(y, sy) + 'px';
-      rect.style.width  = Math.abs(x - sx) + 'px';
-      rect.style.height = Math.abs(y - sy) + 'px';
-    };
-    const onUp = ()=>{
-      cropping = false;
-      document.removeEventListener('mousemove', onMove);
-      document.removeEventListener('mouseup', onUp);
-    };
-    document.addEventListener('mousemove', onMove);
-    document.addEventListener('mouseup', onUp);
-  });
+  /* ===== Cattura: start + freeze robusto ===== */
+  async function ensureVideoReady(){
+    if (!video.srcObject) return false;
+    if (video.readyState >= 2 && video.videoWidth > 0) return true;
+    await new Promise(res=>{
+      const onMeta=()=>{ video.removeEventListener('loadedmetadata', onMeta); res(); };
+      video.addEventListener('loadedmetadata', onMeta);
+    });
+    return video.videoWidth > 0;
+  }
 
-  // Avvia cattura
   document.getElementById('start').onclick = async ()=>{
     try{
       stream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:false });
       video.srcObject = stream;
+      await video.play();
+      const ok = await ensureVideoReady();
+      if (!ok) throw new Error('Stream video non pronto');
+
       document.getElementById('freeze').disabled = false;
-    }catch(e){ alert('Cattura negata: '+e); }
+    }catch(e){
+      alert('Cattura negata o non disponibile: ' + (e.message||e));
+    }
   };
 
-  // Scatta frame → IMG
-  document.getElementById('freeze').onclick = ()=>{
-    if (!stream) return;
-    const track = stream.getVideoTracks()[0];
-    const imageCapture = new ImageCapture(track);
-    imageCapture.grabFrame().then(bitmap=>{
+  // Freeze – prima provo drawImage(video), fallback a ImageCapture
+  document.getElementById('freeze').onclick = async ()=>{
+    if (!stream || !video.videoWidth){
+      alert('Stream non attivo.');
+      return;
+    }
+    try {
+      // Tentativo 1: canvas ← <video>
+      const vw = video.videoWidth, vh = video.videoHeight;
       const c = document.createElement('canvas');
-      c.width = bitmap.width; c.height = bitmap.height;
-      c.getContext('2d').drawImage(bitmap, 0, 0);
-      img.src = c.toDataURL('image/png');
-      document.getElementById('save').disabled = false;
-      document.getElementById('send').disabled = false;
-    }).catch(err=> alert('Errore scatto: ' + err));
+      c.width = vw; c.height = vh;
+      const ctx = c.getContext('2d');
+      ctx.drawImage(video, 0, 0, vw, vh);
+      const dataUrl = c.toDataURL('image/png');
+      if (dataUrl && dataUrl.length > 100) {
+        img.src = dataUrl;
+      } else {
+        throw new Error('drawImage ha restituito un frame vuoto');
+      }
+    } catch (_e) {
+      // Tentativo 2: ImageCapture.grabFrame()
+      try {
+        const track = stream.getVideoTracks()[0];
+        const ic = new ImageCapture(track);
+        const bmp = await ic.grabFrame();
+        const c = document.createElement('canvas');
+        c.width = bmp.width; c.height = bmp.height;
+        c.getContext('2d').drawImage(bmp, 0, 0);
+        img.src = c.toDataURL('image/png');
+      } catch (e2) {
+        alert('Errore scatto: ' + (e2.message||e2));
+        return;
+      }
+    }
+    document.getElementById('save').disabled = false;
+    document.getElementById('send').disabled = false;
   };
 
-  // Salva (o invia) al Web App
+  /* ===== Invio a Web App ===== */
   async function postToApp(sendEmail){
     if(!APP || !TOKEN){ alert('Configura ?app= e ?t= nell’URL della pagina di cattura.'); return; }
     const payload = dataUrlFromImageWithCrop(); if(!payload){ alert('Nessuna immagine.'); return; }
