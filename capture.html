@@ -56,7 +56,6 @@
   /* ===== Fence migliorata con Pointer Events ===== */
   (function initFence(){
     let dragging=false, sx=0, sy=0;
-
     function bounds(e){
       const r = wrap.getBoundingClientRect();
       const x = Math.max(0, Math.min(e.clientX - r.left, r.width));
@@ -145,7 +144,6 @@
       await video.play();
       const ok = await ensureVideoReady();
       if (!ok) throw new Error('Stream video non pronto');
-
       document.getElementById('freeze').disabled = false;
     }catch(e){
       alert('Cattura negata o non disponibile: ' + (e.message||e));
@@ -159,7 +157,6 @@
       return;
     }
     try {
-      // Tentativo 1: canvas ← <video>
       const vw = video.videoWidth, vh = video.videoHeight;
       const c = document.createElement('canvas');
       c.width = vw; c.height = vh;
@@ -172,7 +169,6 @@
         throw new Error('drawImage ha restituito un frame vuoto');
       }
     } catch (_e) {
-      // Tentativo 2: ImageCapture.grabFrame()
       try {
         const track = stream.getVideoTracks()[0];
         const ic = new ImageCapture(track);
@@ -190,7 +186,7 @@
     document.getElementById('send').disabled = false;
   };
 
-  /* ===== Invio a Web App ===== */
+  /* ===== Invio a Web App (CORS-safe: text/plain) ===== */
   async function postToApp(sendEmail){
     if(!APP || !TOKEN){ alert('Configura ?app= e ?t= nell’URL della pagina di cattura.'); return; }
     const payload = dataUrlFromImageWithCrop(); if(!payload){ alert('Nessuna immagine.'); return; }
@@ -211,7 +207,11 @@
       }
     };
 
-    const res = await fetch(APP, { method:'POST', headers:{'Content-Type':'text/plain; charset=utf-8'}, body: JSON.stringify(body) });
+    const res = await fetch(APP, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain; charset=utf-8'},
+      body: JSON.stringify(body)
+    });
     const json = await res.json();
     if (!json.ok) throw new Error(json.error || 'Errore sconosciuto');
     alert((sendEmail?'Inviato e salvato.':'Salvato.') + '\nSHA-256: ' + json.sha256 + '\nCartella: ' + json.folderUrl);
@@ -219,14 +219,6 @@
 
   document.getElementById('save').onclick = ()=> postToApp(false).catch(e=>alert(e));
   document.getElementById('send').onclick = ()=> postToApp(true).catch(e=>alert(e));
-
-
-
-  
 </script>
-
-
-
-  
 </body>
 </html>
