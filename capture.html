@@ -211,7 +211,7 @@
       }
     };
 
-    const res = await fetch(APP, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(body) });
+    const res = await fetch(APP, { method:'POST', headers:{'Content-Type':'text/plain; charset=utf-8'}, body: JSON.stringify(body) });
     const json = await res.json();
     if (!json.ok) throw new Error(json.error || 'Errore sconosciuto');
     alert((sendEmail?'Inviato e salvato.':'Salvato.') + '\nSHA-256: ' + json.sha256 + '\nCartella: ' + json.folderUrl);
@@ -219,6 +219,35 @@
 
   document.getElementById('save').onclick = ()=> postToApp(false).catch(e=>alert(e));
   document.getElementById('send').onclick = ()=> postToApp(true).catch(e=>alert(e));
+
+
+
+async function callApp(body){
+  try{
+    const res = await fetch(APP, {
+      method:'POST',
+      headers:{'Content-Type':'text/plain; charset=utf-8'},
+      body: JSON.stringify(body)
+    });
+    if(!res.ok){
+      const txt = await res.text().catch(()=> '');
+      throw new Error('HTTP ' + res.status + ' ' + res.statusText + (txt?(' – '+txt.substr(0,200)):''));
+    }
+    return await res.json();
+  }catch(e){
+    // qui vedi davvero cosa è andato storto
+    alert('Fetch errore: ' + e.message);
+    throw e;
+  }
+}
+
+const json = await callApp(body);
+
+  
 </script>
+
+
+
+  
 </body>
 </html>
