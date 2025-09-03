@@ -1,522 +1,279 @@
-/***** Web Evidence — v10 (sessioni, Deep Snapshot, SM/PSI, PNG/WEBM, MANIFEST+ZIP, email) *****/
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Web Evidence – v10</title>
+<style>
+  :root{--bd:#ddd;--accent:#0b5cff}
+  body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0}
+  header{display:grid;grid-template-columns:190px 1fr auto auto 240px 1fr auto auto;gap:8px;align-items:center;border-bottom:1px solid #eee;padding:10px}
+  input,button,select{padding:8px;border:1px solid var(--bd);border-radius:8px;background:#fafafa}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button[disabled]{opacity:.55;cursor:not-allowed}
+  button[data-on="1"]{box-shadow:0 0 0 3px rgba(11,92,255,.2)}
+  #state{justify-self:end;font-size:12px;color:#222;background:#f3f4f6;border-radius:999px;padding:.25rem .6rem}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid #f0f0f0}
+  #work{display:grid;grid-template-columns:1.2fr .8fr;gap:10px;padding:10px}
+  video{width:100%;background:#000;border-radius:8px;height:72vh}
+  #cropWrap{position:relative;user-select:none;-webkit-user-select:none}
+  #img{max-width:100%;display:none;-webkit-user-drag:none;user-drag:none}
+  #img.hasSrc{display:block}
+  #rect{position:absolute;border:2px dashed #000;background:rgba(0,0,0,.12);display:none;pointer-events:none}
+  #log{height:240px;border:1px solid #eee;border-radius:8px;padding:8px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;background:#fafafa;white-space:pre-wrap}
+</style>
+</head>
+<body>
 
-const DATA_SHEET = 'DATA';
-const CELL_SM_KEY = 'B1';
-const CELL_PSI_KEY = 'B2';
-const CELL_EMAIL  = 'B3';
-const CELL_SUBJ   = 'B4';
-const CELL_FOLDER = 'B5';   // opzionale override
-const CELL_TOKEN  = 'B7';
-const ROOT_FOLDER_ID = '';  // opzionale cartella radice su Drive
+<header>
+  <input id="client" placeholder="Cliente (obbligatorio)"/>
+  <input id="addr"   placeholder="https://…"/>
+  <button id="btnOpen">Apri scheda</button>
+  <button id="btnShare" class="primary">Condividi finestra/scheda</button>
 
-/* ===================== ROUTER ===================== */
+  <input id="rcpts" placeholder="Destinatari PEC/email"/>
+  <input id="subj"  value="Web Evidence – Screenshot"/>
+  <button id="btnStart">Inizia certificazione</button>
+  <button id="btnFinish" disabled>Termina</button>
 
-function doGet(e){
-  try {
-    const mode = String(e.parameter.mode||'').toLowerCase();
-    if (!mode) return _json({ok:false, error:'Missing mode'});
+  <span id="state">Pronto</span>
+</header>
 
-    // proteggi tutte le azioni “mutanti”
-    const needsTok = ['start','sm','psi','snapshot','finish','note'].includes(mode);
-    if (needsTok) _requireToken(String(e.parameter.t||''));
+<div class="bar">
+  <button id="btnSnap"  disabled>Scatta</button>
+  <button id="btnReset" disabled>Reset selezione</button>
 
-    if (mode==='start')    return _json(_startSession(e));
-    if (mode==='sm')       return _json(_getSM(e));
-    if (mode==='psi')      return _json(_getPSI(e));
-    if (mode==='snapshot') return _json(_snapshot(e));
-    if (mode==='finish')   return _json(_finish(e));
-    if (mode==='note')     return _json(_serverNote(e)); // append a _events.log.txt
+  <span style="margin-left:16px">
+    <label>SM:</label>
+    <select id="smDim" disabled>
+      <option>1366xfull</option><option selected>1920xfull</option><option>2560xfull</option><option>3840xfull</option>
+      <option disabled>──────────</option>
+      <option>1366x768</option><option>1600x900</option><option>1920x1080</option><option>2560x1440</option><option>3840x2160</option>
+    </select>
+    <button id="btnSMPSI" disabled>Salva completi (SM+PSI)</button>
+    <button id="btnSnapshot" disabled>Deep Snapshot</button>
+  </span>
 
-    return _json({ok:false, error:'Unknown mode'});
-  } catch (err) {
-    return _json({ok:false, error:String(err && err.message || err)});
-  }
+  <span style="margin-left:auto">
+    <button id="recStart" disabled>REC</button>
+    <button id="recStop"  disabled>Stop</button>
+    <button id="savePng"  disabled>Salva PNG</button>
+    <button id="savePngEmail" disabled>Salva+Email</button>
+    <button id="saveVideo" disabled>Salva VIDEO</button>
+  </span>
+</div>
+
+<div id="work">
+  <video id="video" autoplay playsinline></video>
+  <div id="cropWrap">
+    <img id="img" alt="">
+    <div id="rect"></div>
+  </div>
+</div>
+
+<div style="padding:8px 10px"><b>Log</b></div>
+<div id="log"></div>
+
+<script>
+/* ===== Query ===== */
+const qs=new URLSearchParams(location.search);
+const APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
+if(qs.get('u')) addr.value=qs.get('u');
+if(qs.get('client')) client.value=qs.get('client');
+if(qs.get('to')) rcpts.value=qs.get('to');
+if(qs.get('subj')) subj.value=qs.get('subj');
+
+/* ===== Stato ===== */
+let SID=''; let currentUrl=(addr.value||'').trim();
+let stream=null, rec=null, chunks=[];
+let lastImgHasSrc=false;
+
+const $=id=>document.getElementById(id);
+const video=$('video'), img=$('img'), rect=$('rect'), wrap=$('cropWrap');
+
+/* ===== UI ===== */
+const setState=s=>$('state').textContent=s;
+const log=s=>{ const L=$('log'); L.textContent+=(L.textContent?'\n':'')+'['+(new Date().toLocaleTimeString())+'] '+s; L.scrollTop=L.scrollHeight; setState(s); };
+async function note(type, data={}){
+  if(!SID) return;
+  const q='mode=note&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)
+        +'&msg='+encodeURIComponent(type+' '+JSON.stringify(data))+'&ua='+encodeURIComponent(navigator.userAgent||'');
+  try{ await fetch(APP+(APP.includes('?')?'&':'?')+q); }catch(_){}
+}
+function hasStream(){ return !!(video.srcObject && video.videoWidth); }
+function updateUI(){
+  const s=!!SID, v=hasStream();
+  // scatto/rec: sessione+stream
+  ['btnSnap','btnReset','recStart'].forEach(id=> $(id).disabled = !(s && v));
+  // salvataggi immagini
+  $('savePng').disabled = !lastImgHasSrc;
+  $('savePngEmail').disabled = $('savePng').disabled;
+  // SM/PSI/snapshot: sessione
+  ['smDim','btnSMPSI','btnSnapshot'].forEach(id=> $(id).disabled = !s);
+  $('saveVideo').disabled = !('lastVideoB64' in window);
+  $('btnFinish').disabled = !s;
 }
 
-function doPost(e){
+/* ===== chiamate ===== */
+async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); if(!r.ok){throw new Error('HTTP '+r.status);} return r.json(); }
+async function POST(body){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(body)}); if(!r.ok){throw new Error('HTTP '+r.status);} return r.json(); }
+
+/* ===== Apertura + Condivisione ===== */
+btnOpen.onclick = ()=>{
+  const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
+  window.open(u, '_we_'+Date.now(), 'noopener,width=1280,height=900'); log('Scheda aperta. Ora “Condividi” e scegli quella scheda.');
+};
+btnShare.onclick = async ()=>{
   try{
-    const body = e.postData ? e.postData.contents : '';
-    const obj  = JSON.parse(body || '{}');
+    stream = await navigator.mediaDevices.getDisplayMedia({video:{preferCurrentTab:true, displaySurface:'browser'}, audio:false});
+    video.srcObject = stream; await video.play();
+    log('Condivisione attiva (scheda/finestra/schermo).');
+    note('PREVIEW_START',{surface: (stream.getVideoTracks()[0].getSettings()?.displaySurface||'')});
+    stream.getVideoTracks()[0].addEventListener('ended', ()=>{ log('Condivisione terminata'); note('PREVIEW_END'); updateUI();});
+  }catch(e){ alert('Condivisione negata: '+(e.message||e)); }
+  updateUI();
+};
 
-    _requireToken(String(obj.authToken||''));
-    const sid = String(obj.sid||'').trim();
-    if (!sid) throw new Error('Missing sid');
-
-    const res = _saveInSession(
-      sid,
-      obj.fileNameHint || `capture_${Date.now()}.png`,
-      obj.dataUrl,                        // data:image/... o data:video/webm
-      obj.meta || {},                     // {url,finalUrl,sourceMeta{provider,dimension,label},crop}
-      !!obj.sendEmail,
-      obj.recipients || '',
-      obj.subject || ''
-    );
-    return _json({ok:true, ...res});
-  }catch(err){
-    return _json({ok:false, error:String(err && err.message || err)});
-  }
-}
-
-function _json(o){ return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }
-
-/* ===================== START (cartella + Deep Snapshot) ===================== */
-
-function _startSession(e){
-  const rawU = String(e.parameter.u||'').trim(); if (!rawU) throw new Error('Missing u');
-  const url  = _coerceUrl(rawU);
-
-  // dominio robusto lato server
-  let domain = '';
-  try{ domain = new URL(url).hostname || ''; }catch(_){}
-  if (!domain){
-    const m = url.match(/^[a-z]+:\/\/([^/]+)/i);
-    domain = m ? m[1] : 'no-host';
-  }
-  const client = _sanitize(String(e.parameter.client||'').trim() || 'cliente');
-
-  const nowIso = new Date().toISOString();
-  const root = ROOT_FOLDER_ID ? DriveApp.getFolderById(ROOT_FOLDER_ID) : DriveApp.getRootFolder();
-  const baseName = `${client}__${_sanitize(domain)}__${_fmtDateIt(nowIso)}__${_fmtTimeIt(nowIso)}`;
-
-  // override manuale opzionale (DATA!B5)
-  const ov = _getFolderOverride();
-  const finalName = ov ? `${_sanitize(ov)}__${_fmtDateIt(nowIso)}__${_fmtTimeIt(nowIso)}` : baseName;
-
-  const sess = root.createFolder(finalName);
-
-  // contesto iniziale
-  const details = {
-    url, domain, client,
-    startedAt: nowIso,
-    userAgent: String(e.parameter.ua||''),
-    timezone:  String(e.parameter.tz||''),
-    language:  String(e.parameter.lang||''),
-    viewport: { vw:+(e.parameter.vw||0), vh:+(e.parameter.vh||0) },
-    screen:   { sw:+(e.parameter.sw||0), sh:+(e.parameter.sh||0), dpr:+(e.parameter.dpr||0) },
-    pageUrl: String(e.parameter.page||'')
-  };
-  _writeJson(sess, '_manifest_start.json', details);
-  _writeJson(sess, '_index.json', []);
-  _appendEvent(sess, 'SESSION_START', { url, client, domain });
-
-  // DNS A/AAAA
-  try {
-    const a = UrlFetchApp.fetch('https://dns.google/resolve?name='+encodeURIComponent(domain)+'&type=A',    {muteHttpExceptions:true,timeout:10000});
-    const b = UrlFetchApp.fetch('https://dns.google/resolve?name='+encodeURIComponent(domain)+'&type=AAAA', {muteHttpExceptions:true,timeout:10000});
-    _writeJson(sess, 'dns.json', {
-      domain,
-      A:(JSON.parse(a.getContentText()).Answer||[]).map(r=>r.data),
-      AAAA:(JSON.parse(b.getContentText()).Answer||[]).map(r=>r.data),
-      at: nowIso
-    });
-  }catch(_){}
-
-  // Deep snapshot iniziale (HTML+HEADERS+ASSET)
-  const first = _takeDeepSnapshot(sess, url, 'start');
-
-  _regenerateIndexHtml(sess);
-  return { ok:true, sessionId: sess.getId(), base: sess.getName(), snapshot: first };
-}
-
-/* ===================== EXTERNAL FETCH (SM / PSI) ===================== */
-
-function _getSM(e){
-  const url = _coerceUrl(String(e.parameter.u||'')); if(!url) throw new Error('Missing u');
-  const dim = String(e.parameter.dim||'1920xfull').trim();
-  const key = _getSMKey();
-  const q = { key, url, dimension: dim, delay: 6000, cacheLimit: 0, format: 'png' };
-  const api = 'https://api.screenshotmachine.com?' + _toQuery(q);
-
-  const r = UrlFetchApp.fetch(api, { muteHttpExceptions:true, followRedirects:true, timeout:120000 });
-  if (r.getResponseCode()>=400) throw new Error(`SM ${dim} HTTP ${r.getResponseCode()} – ${r.getContentText().slice(0,300)}`);
-
-  const b64 = Utilities.base64Encode(r.getBlob().getBytes());
-  return {
-    ok:true,
-    dataUrl: 'data:image/png;base64,' + b64,
-    meta: { provider:'screenshotmachine',
-            dimension: dim,
-            label: /\bfull\b/i.test(dim) ? `SM_FULL(${dim})` : `SM_VIEW(${dim})`,
-            request: api.replace(/([?&]key=)[^&]+/i,'$1***') }
-  };
-}
-
-function _getPSI(e){
-  const url = _coerceUrl(String(e.parameter.u||'')); if(!url) throw new Error('Missing u');
-  const key = _getPSIKey();
-  const api = 'https://www.googleapis.com/pagespeedonline/v5/runPagespeed?category=performance&strategy=desktop'
-            + '&url=' + encodeURIComponent(url) + '&key=' + encodeURIComponent(key);
-
-  const r = UrlFetchApp.fetch(api, { muteHttpExceptions:true, followRedirects:true, timeout:60000 });
-  if (r.getResponseCode()>=400) throw new Error(`PSI HTTP ${r.getResponseCode()} – ${r.getContentText().slice(0,300)}`);
-
-  const obj = JSON.parse(r.getContentText());
-  const audits = obj?.lighthouseResult?.audits || {};
-  const full  = audits['full-page-screenshot']?.details?.screenshot?.data;
-  const final = audits['final-screenshot']?.details?.data;
-  const thumb = audits['screenshot-thumbnails']?.details?.items?.[0]?.data;
-  const dataUrl = full || final || thumb;
-  if (!dataUrl) throw new Error('PSI: nessuno screenshot disponibile');
-
-  const mode = full ? 'FULLPAGE' : final ? 'FINAL' : 'THUMB';
-  return { ok:true, dataUrl, meta: { provider:'psi', label:`PSI_${mode}`, dimension: mode } };
-}
-
-/* ===================== SNAPSHOT (HTML+HEADERS+ASSET) ===================== */
-
-function _snapshot(e){
-  const sid = String(e.parameter.id||'').trim(); if (!sid) throw new Error('Missing id');
-  const url = _coerceUrl(String(e.parameter.u||'')); if(!url) throw new Error('Missing u');
-  const sess = DriveApp.getFolderById(sid);
-  const info = _takeDeepSnapshot(sess, url, 'manual');
-  _appendEvent(sess, 'SNAPSHOT', info);
-  _updateIndex(sess, {
-    url: info.url, finalUrl: info.finalUrl, canonical:'',
-    timestamp: new Date().toISOString(),
-    sha256:'', type:'snapshot', name: info.folder, driveUrl: info.folderUrl,
-    source:{provider:'snapshot', dimension: info.saved+' assets', label:'SNAPSHOT'}, crop:null
+/* ===== Fence ===== */
+(function fence(){
+  let drag=false,sx=0,sy=0;
+  function bounds(e){ const r=wrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
+  wrap.addEventListener('pointerdown', e=>{
+    if(!lastImgHasSrc) return;
+    if(e.button!==0 && e.pointerType==='mouse') return;
+    e.preventDefault(); drag=true; wrap.setPointerCapture?.(e.pointerId);
+    const p=bounds(e); sx=p.x; sy=p.y;
+    Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px',display:'block'});
   });
-  return { ok:true, assets: info.saved, folderUrl: info.folderUrl };
-}
-
-// “Deep” snapshot riutilizzabile
-function _takeDeepSnapshot(sessFolder, url, tag){
-  const ts = _fmtTsFiles(new Date().toISOString());
-  const snapRoot = (function(){
-    const it = sessFolder.getFoldersByName('snapshot');
-    return it.hasNext()? it.next() : sessFolder.createFolder('snapshot');
-  })();
-  const sub = snapRoot.createFolder(`snapshot_${ts}__${tag||''}`);
-
-  const resp = UrlFetchApp.fetch(url, {muteHttpExceptions:true, followRedirects:true, validateHttpsCertificates:true, timeout:30000});
-  const code = resp.getResponseCode();
-  const finalUrl = resp.getHeaders()['X-Final-Url'] || url;
-  const headers = resp.getAllHeaders ? resp.getAllHeaders() : resp.getHeaders();
-  const htmlBytes = resp.getContent();
-  const htmlText  = Utilities.newBlob(htmlBytes,'text/html').getDataAsString('UTF-8');
-  const htmlSha   = _shaHex(htmlBytes);
-
-  _writeJson(sub, 'HEADERS.json', {code, url, finalUrl, headers, html_sha256: htmlSha});
-  sub.createFile(Utilities.newBlob(htmlBytes,'text/html','PAGE.html'));
-
-  // Estrai asset (img/css/video/audio) con limiti
-  const maxFiles = 120, maxBytes = 25*1024*1024; // ~25MB budget
-  const assets = _extractAssets(htmlText, finalUrl, maxFiles, maxBytes);
-  let saved = 0;
-  for (const a of assets){
-    sub.createFile(a.blob);
-    saved++;
-  }
-
-  return { url, finalUrl, folder: sub.getName(), folderUrl: sub.getUrl(), saved, html_sha256: htmlSha };
-}
-
-// parser molto pratico (img/src, srcset, link rel=stylesheet/preload, video/source, bg-image inline)
-function _extractAssets(html, baseUrl, maxFiles, maxTotalBytes){
-  function resolve(h){
-    try{
-      if (/^https?:\/\//i.test(h)) return h;
-      if (h.startsWith('//')) return 'https:'+h;
-      const b = new URL(baseUrl);
-      if (h.startsWith('/')) return b.origin + h;
-      return new URL(h, b.href).href;
-    }catch(_){ return null; }
-  }
-  function extFromCT(ct){
-    const c = (ct||'').toLowerCase();
-    if (c.includes('image/jpeg') || c.includes('image/jpg')) return '.jpg';
-    if (c.includes('image/png'))  return '.png';
-    if (c.includes('image/webp')) return '.webp';
-    if (c.includes('image/gif'))  return '.gif';
-    if (c.includes('image/svg'))  return '.svg';
-    if (c==='text/css' || c.includes('text/css')) return '.css';
-    if (c.includes('video/mp4'))  return '.mp4';
-    if (c.includes('video/webm')) return '.webm';
-    if (c.includes('audio/')) return '.audio';
-    return '';
-  }
-
-  const urls = new Set();
-
-  html.replace(/<(?:img|source|video)\b[^>]*?\bsrc\s*=\s*["']([^"']+)["']/ig,(m,u)=>{urls.add(u);return m;});
-  html.replace(/<img\b[^>]*?\bsrcset\s*=\s*["']([^"']+)["']/ig,(m,set)=>{
-    const best = String(set).split(',').map(s=>s.trim()).map(s=>s.split(/\s+/)[0]).filter(Boolean)[0];
-    if (best) urls.add(best); return m;
+  window.addEventListener('pointermove', e=>{
+    if(!drag) return; const p=bounds(e);
+    rect.style.left=Math.min(p.x,sx)+'px'; rect.style.top=Math.min(p.y,sy)+'px';
+    rect.style.width=Math.abs(p.x-sx)+'px'; rect.style.height=Math.abs(p.y-sy)+'px';
   });
-  html.replace(/<link\b[^>]*rel=["'](?:stylesheet|preload)["'][^>]*\bhref=["']([^"']+)["'][^>]*>/ig,(m,u)=>{urls.add(u);return m;});
-  html.replace(/style\s*=\s*["'][^"']*?background-image\s*:\s*url\(([^)]+)\)[^"']*?["']/ig,(m,u)=>{ urls.add(u.replace(/^['"]|['"]$/g,'')); return m; });
+  window.addEventListener('pointerup', ()=>{ drag=false; const w=parseFloat(rect.style.width)||0,h=parseFloat(rect.style.height)||0; if(w<3&&h<3){rect.style.width='160px';rect.style.height='100px';} });
+})();
+btnReset.onclick = ()=>{ rect.style.display='none'; log('Selezione rimossa'); note('CROP_RESET'); };
 
-  const list = Array.from(urls).map(resolve).filter(Boolean);
-  const out = [];
-  let total = 0, idx=0;
-  for (const u of list){
-    if (out.length>=maxFiles) break;
-    try{
-      const r = UrlFetchApp.fetch(u, {muteHttpExceptions:true,followRedirects:true,timeout:20000});
-      if (r.getResponseCode()>=400) continue;
-      const blob = r.getBlob();
-      const ct = (blob.getContentType()||'').toLowerCase();
-      const bytes = blob.getBytes();
-      if (total + bytes.length > maxTotalBytes) break;
-      total += bytes.length;
-      const ext = extFromCT(ct) || '';
-      const name = `ASSET_${String(++idx).padStart(3,'0')}${ext}`;
-      out.push({ blob: Utilities.newBlob(bytes, ct||'application/octet-stream', name) });
-    }catch(_){}
-  }
-  return out;
+/* ===== Start / Finish ===== */
+btnStart.onclick = async ()=>{
+  const cli=client.value.trim(), u=(addr.value||'').trim();
+  if(!cli){ alert('Cliente obbligatorio'); return; }
+  if(!u){ alert('URL obbligatoria'); return; }
+  currentUrl=u; btnStart.dataset.on='1'; btnStart.disabled=true; setState('Creo sessione…');
+  try{
+    const js=await GET('mode=start&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)
+      +'&client='+encodeURIComponent(cli)
+      +'&ua='+encodeURIComponent(navigator.userAgent||'')
+      +'&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')
+      +'&lang='+encodeURIComponent(navigator.language||'')
+      +'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)
+      +'&page='+encodeURIComponent(location.href||''));
+    if(!js.ok) throw new Error(js.error||'start failed');
+    SID=js.sessionId; log('Sessione avviata: '+js.base+' (snapshot iniziale '+(js.snapshot?.saved||0)+' asset)'); note('SESSION_START_OK',{base:js.base});
+  }catch(e){ alert('Errore start: '+e.message); btnStart.dataset.on='0'; btnStart.disabled=false; }
+  updateUI();
+};
+btnFinish.onclick = async ()=>{
+  if(!SID){ alert('Nessuna sessione'); return; }
+  btnFinish.dataset.on='1'; btnFinish.disabled=true; setState('Creo ZIP…');
+  try{
+    const js=await GET('mode=finish&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)
+      +(rcpts.value?('&to='+encodeURIComponent(rcpts.value)):'')
+      +(subj.value?('&subj='+encodeURIComponent(subj.value)):''));
+    if(!js.ok) throw new Error(js.error||'finish failed');
+    log('ZIP: '+js.zipUrl); note('SESSION_FINISH',{zip:js.zipUrl}); setState('Completato');
+    document.querySelectorAll('button').forEach(b=> b.disabled=true);
+  }catch(e){ alert('Errore finish: '+e.message); btnFinish.dataset.on='0'; btnFinish.disabled=false; }
+};
+
+/* ===== Scatta (da stream) ===== */
+btnSnap.onclick = ()=>{
+  if(!SID){ alert('Avvia certificazione'); return; }
+  if(!hasStream()){ alert('Attiva “Condividi finestra”'); return; }
+  const vw=video.videoWidth, vh=video.videoHeight;
+  const c=document.createElement('canvas'); c.width=vw; c.height=vh; c.getContext('2d').drawImage(video,0,0);
+  img.src=c.toDataURL('image/png'); img.classList.add('hasSrc'); lastImgHasSrc=true; log('Frame acquisito (disegna una selezione per il crop se vuoi).'); note('FRAME_ACQUIRED',{vw,vh});
+  updateUI();
+};
+
+/* ===== Registrazione ===== */
+recStart.onclick = ()=>{
+  if(!SID){ alert('Avvia certificazione'); return; }
+  if(!hasStream()){ alert('Attiva “Condividi finestra”'); return; }
+  chunks=[]; rec=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp9'});
+  rec.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
+  rec.onstop=()=>{ const blob=new Blob(chunks,{type:'video/webm'}); const fr=new FileReader(); fr.onload=()=>{ window.lastVideoB64=String(fr.result); updateUI(); log('Video pronto da salvare'); note('REC_READY'); }; fr.readAsDataURL(blob); };
+  rec.start(); recStart.disabled=true; recStop.disabled=false; log('REC…'); note('REC_START');
+};
+recStop.onclick = ()=>{ if(rec && rec.state!=='inactive') rec.stop(); recStart.disabled=false; recStop.disabled=true; log('REC stop'); note('REC_STOP'); };
+saveVideo.onclick = async ()=>{
+  if(!SID){ alert('Avvia certificazione'); return; }
+  if(!window.lastVideoB64){ alert('Nessun video'); return; }
+  const u=(addr.value||currentUrl||'').trim();
+  const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:window.lastVideoB64,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-record',label:'RECORDING'}}});
+  if(!sv.ok){ alert(sv.error); return; }
+  delete window.lastVideoB64; updateUI(); log('VIDEO salvato: '+sv.name+' sha='+sv.sha256); note('VIDEO_SAVED',{name:sv.name,sha:sv.sha256});
+};
+
+/* ===== Salva PNG (con/senza crop) ===== */
+function makePayload(){
+  if(!lastImgHasSrc) return null;
+  const nW=img.naturalWidth, nH=img.naturalHeight; const c=document.createElement('canvas'), ctx=c.getContext('2d');
+  const hasSel = rect.style.display!=='none' && (parseFloat(rect.style.width)||0)>1 && (parseFloat(rect.style.height)||0)>1;
+  if(!hasSel){ c.width=nW; c.height=nH; ctx.drawImage(img,0,0); return {dataUrl:c.toDataURL('image/png'), crop:null, label:'FRAME_FULL'}; }
+  const dW=img.clientWidth, dH=img.clientHeight;
+  const rx=Math.round(parseFloat(rect.style.left)*nW/dW);
+  const ry=Math.round(parseFloat(rect.style.top )*nH/dH);
+  const rw=Math.round(parseFloat(rect.style.width)*nW/dW);
+  const rh=Math.round(parseFloat(rect.style.height)*nH/dH);
+  c.width=Math.max(1,rw); c.height=Math.max(1,rh); ctx.drawImage(img,rx,ry,rw,rh,0,0,c.width,c.height);
+  return {dataUrl:c.toDataURL('image/png'), crop:{x:rx,y:ry,w:c.width,h:c.height,naturalW:nW,naturalH:nH}, label:'FRAME_CROP'};
 }
-
-/* ===================== SAVE IN SESSION (PNG/WEBM) ===================== */
-
-function _saveInSession(sid, fileNameHint, dataUrl, meta, sendEmail, recipients, subject){
-  if (!/^data:(image\/(png|jpeg)|video\/webm);base64,/i.test(dataUrl)) throw new Error('Formato data URL non supportato (png/jpeg/webm)');
-  const [, mime] = dataUrl.match(/^data:([^;]+);base64,/i) || [];
-  const bytes = Utilities.base64Decode(String(dataUrl).split(',')[1]);
-  const isVideo = /^video\/webm/i.test(mime);
-  const ext = isVideo ? 'webm' : 'png';
-
-  const sess = DriveApp.getFolderById(sid);
-
-  const sha  = _shaHex(bytes);
-  const nowIso = new Date().toISOString();
-
-  const label = _sanitize(meta?.sourceMeta?.label || (isVideo?'RECORDING':'FRAME'));
-  const base  = `${label}__${_fmtTsFiles(nowIso)}__sha_${sha.slice(0,12)}`;
-  const fileName = base + '.' + ext;
-  const jsonName = base + '.json';
-
-  const file = sess.createFile(Utilities.newBlob(bytes, mime, fileName));
-  const info = {
-    url: String(meta?.url||'').trim(),
-    finalUrl: String(meta?.finalUrl||meta?.url||'').trim(),
-    canonical: String(meta?.canonical||'').trim(),
-    driveFileId: file.getId(),
-    driveUrl: file.getUrl(),
-    sha256: sha,
-    timestamp: nowIso,
-    source: meta?.sourceMeta || {},
-    crop: meta?.crop || null
-  };
-  _writeJson(sess, jsonName, info);
-
-  _appendEvent(sess, 'SAVE', { file:fileName, bytes: bytes.length, sha256: sha, label });
-  _updateIndex(sess, {
-    url: info.url, finalUrl: info.finalUrl, canonical: info.canonical,
-    timestamp: nowIso, sha256: sha, type: isVideo?'video':'image',
-    name: fileName, driveUrl: file.getUrl(),
-    source: info.source, crop: info.crop
-  });
-
-  // email opzionale
-  let emailedTo='', usedSubject='';
-  if (sendEmail){
-    const defs = _getEmailDefaults();
-    const to   = (recipients || defs.to || '').trim();
-    const subj = (subject && subject.trim()) || defs.subject || 'Web Evidence – Cattura';
-    if (!to) throw new Error('Nessun destinatario (DATA!B3 o parametro “recipients”).');
-
-    const htmlBody = `<div style="font:14px Arial">
-      <p><b>Web Evidence – ${isVideo?'Video':'Screenshot'}</b></p>
-      <p><b>Label:</b> ${label}</p>
-      <p><b>URL:</b> <a href="${info.url||info.finalUrl}" target="_blank" rel="noopener">${info.url||info.finalUrl}</a></p>
-      <p><b>SHA-256:</b> <code>${sha}</code></p>
-      <p><b>Drive:</b> <a href="${info.driveUrl}" target="_blank" rel="noopener">${fileName}</a></p>
-      <hr/><p>Allegati: ${isVideo?'WEBM':'PNG'} + metadati JSON.</p>
-    </div>`;
-
-    try{
-      GmailApp.sendEmail(to, subj, 'Vedi HTML', {
-        htmlBody,
-        attachments: [
-          Utilities.newBlob(bytes, mime, fileName),
-          Utilities.newBlob(JSON.stringify(info,null,2),'application/json',jsonName)
-        ],
-        name:'Web Evidence Bot'
-      });
-    }catch(_){
-      MailApp.sendEmail({ to, subject:subj, htmlBody,
-        attachments:[
-          Utilities.newBlob(bytes, mime, fileName),
-          Utilities.newBlob(JSON.stringify(info,null,2),'application/json',jsonName)
-        ],
-        name:'Web Evidence Bot'
-      });
-    }
-    emailedTo = to; usedSubject = subj;
-  }
-
-  return { id:file.getId(), name:fileName, url:file.getUrl(), sha256:sha, emailedTo, subject:usedSubject };
+async function savePNG(sendMail){
+  if(!SID){ alert('Avvia certificazione'); return; }
+  const p = makePayload(); if(!p){ alert('Nessuna immagine'); return; }
+  const u=(addr.value||currentUrl||'').trim();
+  const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:p.dataUrl,sendEmail:sendMail,recipients:rcpts.value||undefined,subject:subj.value||undefined,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-capture',label:p.label},crop:p.crop}});
+  if(!sv.ok){ alert(sv.error); return; }
+  log((sendMail?'PNG inviato e ':'PNG ')+'salvato: '+sv.name+' sha='+sv.sha256); note('PNG_SAVED',{name:sv.name,sha:sv.sha256});
 }
+savePng.onclick = ()=> savePNG(false);
+savePngEmail.onclick = ()=> savePNG(true);
 
-/* ===================== FINISH (MANIFEST + ZIP + EMAIL) ===================== */
+/* ===== SM+PSI in un click ===== */
+btnSMPSI.onclick = async ()=>{
+  if(!SID){ alert('Avvia certificazione'); return; }
+  const u=(addr.value||currentUrl||'').trim();
+  const dim=smDim.value;
+  try{
+    setState('SM full-page…');
+    let js=await GET('mode=sm&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)+'&dim='+encodeURIComponent(dim));
+    if(!js.ok) throw new Error(js.error||'SM failed');
+    let sv=await POST({authToken:TOKEN,sid:SID,dataUrl:js.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:js.meta}});
+    if(!sv.ok) throw new Error(sv.error||'save SM failed');
+    log('SM salvato: '+sv.name+' sha='+sv.sha256); note('SM_SAVED',{name:sv.name,sha:sv.sha256});
 
-function _finish(e){
-  const sid = String(e.parameter.id||'').trim(); if (!sid) throw new Error('Missing id/sid');
-  const sess = DriveApp.getFolderById(sid);
+    setState('PSI…');
+    js=await GET('mode=psi&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u));
+    if(!js.ok) throw new Error(js.error||'PSI failed');
+    sv=await POST({authToken:TOKEN,sid:SID,dataUrl:js.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:js.meta}});
+    if(!sv.ok) throw new Error(sv.error||'save PSI failed');
+    log('PSI salvato: '+sv.name+' sha='+sv.sha256); note('PSI_SAVED',{name:sv.name,sha:sv.sha256});
+    setState('Pronto');
+  }catch(e){ alert(e.message); setState('Errore'); }
+};
 
-  const nowIso = new Date().toISOString();
-  _appendEvent(sess, 'SESSION_END', { endedAt: nowIso });
-  _writeJson(sess, '_manifest_end.json', { endedAt: nowIso });
+/* ===== Deep Snapshot manuale ===== */
+btnSnapshot.onclick = async ()=>{
+  if(!SID){ alert('Avvia certificazione'); return; }
+  const u=(addr.value||currentUrl||'').trim(); setState('Snapshot…');
+  const js=await GET('mode=snapshot&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)+'&u='+encodeURIComponent(u));
+  if(!js.ok){ alert(js.error); setState('Errore'); return; }
+  log('Snapshot salvato (asset='+js.assets+')'); note('SNAPSHOT_SAVED',{assets:js.assets}); setState('Pronto');
+};
 
-  // MANIFEST.txt con tutti i file + SHA
-  const listing = _listRecursive(sess, '');
-  const lines = listing.map(it=> `${it.sha256}  ${it.path}`);
-  sess.createFile(Utilities.newBlob(lines.join('\n')+'\n','text/plain','MANIFEST.txt'));
-
-  _regenerateIndexHtml(sess);
-
-  // ZIP dell’intera sessione
-  const zipped = Utilities.zip(listing.map(it => Utilities.newBlob(it.bytes, it.mime, it.path)), sess.getName() + '__bundle.zip');
-  const zipFile = sess.createFile(zipped);
-  _appendEvent(sess, 'ZIP', { file: zipFile.getName(), bytes: zipped.getBytes().length });
-
-  // email opzionale
-  let to = String(e.parameter.to||'').trim();
-  if (!to) to = (_getEmailDefaults().to||'').trim();
-  if (to){
-    const subj = (String(e.parameter.subj||'').trim()) || (_getEmailDefaults().subject||'Web Evidence – Bundle sessione');
-    const htmlBody = `<div style="font:14px Arial">
-      <p><b>Web Evidence – Bundle sessione</b></p>
-      <p><b>Cartella:</b> ${sess.getName()}</p>
-      <p><b>ZIP:</b> <a href="${zipFile.getUrl()}" target="_blank" rel="noopener">${zipFile.getName()}</a></p>
-    </div>`;
-    try { GmailApp.sendEmail(to, subj, 'Vedi HTML', {htmlBody, attachments:[zipFile.getBlob()], name:'Web Evidence Bot'}); }
-    catch(_){ MailApp.sendEmail({to, subject:subj, htmlBody, attachments:[zipFile.getBlob()], name:'Web Evidence Bot'}); }
-  }
-
-  return { ok:true, zipUrl: zipFile.getUrl() };
-}
-
-/* ===================== NOTE (log da frontend) ===================== */
-function _serverNote(e){
-  const sid = String(e.parameter.id||'').trim(); if (!sid) throw new Error('Missing id');
-  const msg = String(e.parameter.msg||'').trim();
-  const ua  = String(e.parameter.ua||'');
-  const sess = DriveApp.getFolderById(sid);
-  _appendEvent(sess, 'NOTE', { msg, ua });
-  return { ok:true };
-}
-
-/* ===================== INDEX / LOG ===================== */
-
-function _appendEvent(folder, type, data){
-  const name = '_events.log.txt';
-  const line = `${new Date().toISOString()}\t${type}\t${JSON.stringify(data)}\n`;
-  const it = folder.getFilesByName(name);
-  if (it.hasNext()){
-    const f = it.next(); f.setContent(f.getBlob().getDataAsString() + line);
-  } else {
-    folder.createFile(name, line, MimeType.PLAIN_TEXT);
-  }
-}
-
-function _updateIndex(folder, entry){
-  let list = [];
-  const it = folder.getFilesByName('_index.json');
-  if (it.hasNext()) list = JSON.parse(it.next().getBlob().getDataAsString('UTF-8')||'[]');
-  list.push(entry);
-  _writeJson(folder, '_index.json', list);
-  _regenerateIndexHtml(folder);
-}
-
-function _regenerateIndexHtml(folder){
-  let list = [];
-  const it = folder.getFilesByName('_index.json');
-  if (it.hasNext()) list = JSON.parse(it.next().getBlob().getDataAsString('UTF-8')||'[]');
-
-  const rows = list.map(e=>{
-    const label = e.source?.label || (e.source?.provider||'');
-    const crop  = e.crop ? `x=${e.crop.x},y=${e.crop.y},w=${e.crop.w},h=${e.crop.h}` : '';
-    return `<tr>
-      <td>${e.timestamp||''}</td>
-      <td>${label||e.type||''}</td>
-      <td>${e.sha256||''}</td>
-      <td><a href="${e.driveUrl||'#'}" target="_blank" rel="noopener">${e.name||''}</a></td>
-      <td><a href="${e.finalUrl||e.url||'#'}" target="_blank" rel="noopener">${(e.finalUrl||e.url||'').replace(/https?:\/\//,'')}</a></td>
-      <td>${e.source?.dimension||''}</td>
-      <td>${crop}</td>
-    </tr>`;
-  }).join('\n');
-
-  const html = `<!doctype html><meta charset="utf-8">
-  <title>Web Evidence – Index</title>
-  <style>body{font:13px/1.4 system-ui,Segoe UI,Roboto,Arial;padding:16px}
-  table{border-collapse:collapse;width:100%} th,td{border:1px solid #ddd;padding:6px} th{background:#f6f6f6;text-align:left}</style>
-  <h1>Indice prove</h1>
-  <table><thead><tr>
-    <th>Timestamp</th><th>Tipo</th><th>SHA-256</th><th>File</th><th>URL</th><th>Dimension</th><th>Crop</th>
-  </tr></thead><tbody>${rows}</tbody></table>`;
-  _writeText(folder, '_index.html', html, MimeType.HTML);
-}
-
-/* ===================== FILE & UTIL ===================== */
-
-function _writeJson(folder, name, obj){
-  const blob = Utilities.newBlob(JSON.stringify(obj,null,2), 'application/json', name);
-  const it = folder.getFilesByName(name);
-  if (it.hasNext()){ const f=it.next(); f.setContent(blob.getDataAsString()); }
-  else folder.createFile(blob);
-}
-function _writeText(folder, name, text, mime){
-  const it = folder.getFilesByName(name);
-  if (it.hasNext()){ const f=it.next(); f.setContent(text); }
-  else folder.createFile(Utilities.newBlob(text, mime||MimeType.PLAIN_TEXT, name));
-}
-
-function _listRecursive(folder, rel){
-  const res = [];
-  const files = folder.getFiles();
-  while(files.hasNext()){
-    const f = files.next();
-    const bytes = f.getBlob().getBytes();
-    res.push({ path:(rel?rel+'/':'')+f.getName(), sha256:_shaHex(bytes), bytes, mime:f.getMimeType()||'application/octet-stream' });
-  }
-  const subs = folder.getFolders();
-  while(subs.hasNext()){
-    const sub = subs.next();
-    res.push(..._listRecursive(sub, (rel?rel+'/':'')+sub.getName()));
-  }
-  return res;
-}
-
-function _getEmailDefaults(){
-  const sh = SpreadsheetApp.getActive().getSheetByName(DATA_SHEET);
-  if (!sh) return {to:'',subject:''};
-  return {
-    to: String(sh.getRange(CELL_EMAIL).getValue()||'').trim(),
-    subject: String(sh.getRange(CELL_SUBJ).getValue()||'').trim()
-  };
-}
-function _getFolderOverride(){
-  const sh = SpreadsheetApp.getActive().getSheetByName(DATA_SHEET);
-  if (!sh) return '';
-  return String(sh.getRange(CELL_FOLDER).getValue()||'').trim();
-}
-function _getSMKey(){
-  const sh = SpreadsheetApp.getActive().getSheetByName(DATA_SHEET);
-  if (!sh) throw new Error(`Foglio ${DATA_SHEET} mancante`);
-  const k = String(sh.getRange(CELL_SM_KEY).getValue()||'').trim();
-  if (!k) throw new Error(`Inserisci ScreenshotMachine key in ${DATA_SHEET}!${CELL_SM_KEY}`);
-  return k;
-}
-function _getPSIKey(){
-  const sh = SpreadsheetApp.getActive().getSheetByName(DATA_SHEET);
-  if (!sh) throw new Error(`Foglio ${DATA_SHEET} mancante`);
-  const k = String(sh.getRange(CELL_PSI_KEY).getValue()||'').trim();
-  if (!k) throw new Error(`Inserisci PageSpeed key in ${DATA_SHEET}!${CELL_PSI_KEY}`);
-  return k;
-}
-function _requireToken(tok){
-  const sh = SpreadsheetApp.getActive().getSheetByName(DATA_SHEET);
-  const expect = sh ? String(sh.getRange(CELL_TOKEN).getValue()||'').trim() : '';
-  if (!expect) throw new Error(`Imposta token in ${DATA_SHEET}!${CELL_TOKEN}`);
-  if (String(tok||'').trim() !== expect) throw new Error('Token non valido');
-}
-function _toQuery(o){ return Object.keys(o).map(k=>encodeURIComponent(k)+'='+encodeURIComponent(String(o[k]))).join('&'); }
-function _coerceUrl(u){ let s=String(u||'').trim().replace(/[<>]/g,''); if(!/^https?:\/\//i.test(s)&&/\.[A-Za-z]{2,}/.test(s)) s='https://'+s; return s; }
-function _sanitize(s){ return String(s||'').replace(/[\\/:*?"<>|]+/g,'_').replace(/\s+/g,' ').trim().slice(0,128); }
-function _fmtDateIt(iso){ const tz=Session.getScriptTimeZone?Session.getScriptTimeZone():'Europe/Rome'; return Utilities.formatDate(new Date(iso),tz,'dd-MM-yyyy'); }
-function _fmtTimeIt(iso){ const tz=Session.getScriptTimeZone?Session.getScriptTimeZone():'Europe/Rome'; return Utilities.formatDate(new Date(iso),tz,'HH-mm'); }
-function _fmtTsFiles(iso){ return iso.replace('T','-').replace(/[:.].*Z?$/,'').replace(/:/g,'-'); }
-function _shaHex(bytes){ return Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes).map(b=>('0'+(b&255).toString(16)).slice(-2)).join(''); }
+/* ===== Boot ===== */
+updateUI();
+</script>
+</body>
+</html>
