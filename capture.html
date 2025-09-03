@@ -1,45 +1,39 @@
 <!doctype html>
 <html lang="it">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
-<title>Web Evidence – Certificazione</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Web Evidence – Certificazione (v10)</title>
 <style>
-  :root { --ok:#16a34a; --warn:#d97706; --err:#dc2626; --muted:#999; }
+  :root{--mut:#666;--bd:#ddd;--accent:#0b5cff}
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0}
-  header{display:grid;grid-template-columns:220px 1fr auto auto 1fr auto;gap:8px;padding:10px;border-bottom:1px solid #eee;align-items:center}
-  input,select,button{padding:8px;border:1px solid #ddd;border-radius:8px;background:#fafafa}
-  button.primary{background:#111;color:#fff}
-  button[disabled]{opacity:.5;cursor:not-allowed}
+  header{display:grid;grid-template-columns:160px 1fr auto auto 1fr 1fr auto auto;gap:8px;align-items:center;border-bottom:1px solid #eee;padding:10px}
+  input,select,button{padding:8px;border:1px solid var(--bd);border-radius:8px;background:#fafafa}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button[disabled]{opacity:.55;cursor:not-allowed}
+  #state{justify-self:end;font-size:12px;color:#222;background:#f3f4f6;border-radius:999px;padding:.25rem .6rem}
   .toolbar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid #f0f0f0}
-  #work{display:grid;grid-template-columns:1.2fr 0.8fr;gap:10px;padding:10px;align-items:start}
-  video,canvas{width:100%;background:#000;border-radius:8px}
-  #previewWrap{position:relative}
-  #shot{max-width:100%;display:block;-webkit-user-drag:none;user-drag:none}
+  #work{display:grid;grid-template-columns:1.2fr .8fr;gap:10px;padding:10px}
+  video{width:100%;background:#000;border-radius:8px;height:52vh}
+  #cropWrap{position:relative;user-select:none;-webkit-user-select:none}
+  #img{max-width:100%;display:block;-webkit-user-drag:none;user-drag:none}
   #rect{position:absolute;border:2px dashed #000;background:rgba(0,0,0,.12);display:none;pointer-events:none}
-  #log{height:180px;border:1px solid #eee;border-radius:8px;padding:8px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;background:#fafafa}
-  .pill{padding:.2rem .5rem;border-radius:999px;background:#f3f4f6;color:#333;font-size:12px}
-  .ok{color:var(--ok)} .err{color:var(--err)} .muted{color:#777}
+  #log{height:160px;border:1px solid #eee;border-radius:8px;padding:8px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;background:#fafafa;white-space:pre-wrap}
+  iframe#preview{width:100%;height:240px;border:1px solid #eee;border-radius:8px}
 </style>
 </head>
 <body>
 
 <header>
-  <input id="client" placeholder="Cliente..." />
-  <input id="url" type="url" placeholder="https://…" />
+  <input id="client" placeholder="Cliente…" />
+  <input id="addr" type="url" placeholder="https://…"/>
   <button id="btnPreview">Anteprima</button>
-  <button id="btnOpen" onclick="open(url.value,'_blank');">Apri scheda</button>
-  <span id="state" class="pill muted">Pronto</span>
-  <div style="text-align:right">
-    <label class="muted" style="font-size:12px">Destinatari</label>
-    <input id="rcpts" placeholder="a@pec.it, b@example.com"/>
-  </div>
-  <div>
-    <label class="muted" style="font-size:12px">Oggetto</label>
-    <input id="subj" value="Web Evidence – Screenshot"/>
-  </div>
+  <button id="btnOpen">Apri scheda</button>
+  <span id="state">Pronto</span>
+  <input id="rcpts" placeholder="Destinatari PEC/email"/>
+  <input id="subj"  value="Web Evidence – Screenshot"/>
   <button id="btnStart" class="primary">Inizia certificazione</button>
-  <button id="btnFinish" disabled>Termina certificazione</button>
+  <button id="btnFinish" disabled>Termina</button>
 </header>
 
 <div class="toolbar">
@@ -49,43 +43,40 @@
   <button id="capReset"  disabled>Annulla selezione</button>
 
   <span style="margin-left:16px">
-    <label class="muted">SM:</label>
+    <label>SM:</label>
     <select id="smDim">
-      <option>1366xfull</option>
-      <option selected>1920xfull</option>
-      <option>2560xfull</option>
-      <option>3840xfull</option>
+      <option>1366xfull</option><option selected>1920xfull</option><option>2560xfull</option><option>3840xfull</option>
       <option disabled>──────────</option>
-      <option>1366x768</option>
-      <option>1600x900</option>
-      <option>1920x1080</option>
-      <option>2560x1440</option>
-      <option>3840x2160</option>
+      <option>1366x768</option><option>1600x900</option><option>1920x1080</option><option>2560x1440</option><option>3840x2160</option>
     </select>
-    <button id="btnSMfull">SM full-page</button>
-    <button id="btnSMview">SM view</button>
-    <button id="btnPSI">PSI</button>
-    <button id="btnProbe">Snapshot pagina</button>
+    <button id="btnSMfull" disabled>SM full-page</button>
+    <button id="btnSMview" disabled>SM view</button>
+    <button id="btnPSI"   disabled>PSI</button>
+    <button id="btnSnap"  disabled>Snapshot pagina</button>
   </span>
 
   <span style="margin-left:auto">
-    <button id="savePng" disabled>Salva PNG (intero)</button>
+    <button id="savePng"  disabled>Salva PNG</button>
     <button id="savePngEmail" disabled>Salva+Email</button>
     <button id="saveVideo" disabled>Salva VIDEO</button>
   </span>
 </div>
 
+<div style="padding:10px">
+  <iframe id="preview" title="Anteprima (se consentito)"></iframe>
+</div>
+
 <div id="work">
   <div>
-    <video id="video" autoplay playsinline style="height:52vh"></video>
+    <video id="video" autoplay playsinline></video>
     <div style="margin-top:8px">
-      <button id="recStart" disabled>REC video</button>
-      <button id="recStop"  disabled>Stop REC</button>
-      <span id="recState" class="pill muted">idle</span>
+      <button id="recStart" disabled>REC</button>
+      <button id="recStop"  disabled>Stop</button>
+      <span id="recState" style="margin-left:8px;font-size:12px;color:#666">idle</span>
     </div>
   </div>
-  <div id="previewWrap">
-    <img id="shot" alt="anteprima"/>
+  <div id="cropWrap">
+    <img id="img" alt="Anteprima cattura"/>
     <div id="rect"></div>
   </div>
 </div>
@@ -103,121 +94,106 @@ const DEFC  = qs.get('client') || '';
 const DEFT  = qs.get('to')  || '';
 const DEFS  = qs.get('subj')|| '';
 
-url.value    = DEFU || '';
 client.value = DEFC || '';
+addr.value   = DEFU || '';
 rcpts.value  = DEFT || '';
 if (DEFS) subj.value = DEFS;
 
 /* ===== State ===== */
-let SID = '';                     // folderId sessione
-let currentUrl = url.value.trim();
+let SID = '';                   // id cartella sessione
+let currentUrl = addr.value.trim();
 let stream = null;
 let mediaRec = null, chunks=[];
-let lastArtifact = null;          // { type:'image'|'video', dataUrl|blobUrl, meta:{} }
-const shot = document.getElementById('shot');
+let last = { type:'', dataUrl:'', meta:null, crop:null };
+const shot = document.getElementById('img');
 const rect = document.getElementById('rect');
-const wrap = document.getElementById('previewWrap');
+const wrap = document.getElementById('cropWrap');
 const video= document.getElementById('video');
+const preview = document.getElementById('preview');
 
 /* ===== Utils ===== */
-const ts = ()=> new Date().toLocaleTimeString();
-function log(msg, cls=''){
-  const el = document.getElementById('log');
-  const line = `[${ts()}] ${msg}`;
-  el.textContent += (el.textContent?'\n':'') + line;
-  el.scrollTop = el.scrollHeight;
-  if (SID) fetch(APP+'?mode=log&sid='+encodeURIComponent(SID)+'&line='+encodeURIComponent(line));
-}
-function needSID(){ if(!SID){ alert('Avvia "Inizia certificazione" prima.'); return true;} return false; }
-const sleep = ms => new Promise(r=>setTimeout(r,ms));
+function setState(t){ document.getElementById('state').textContent = t; }
+const log = (s)=>{ const L=document.getElementById('log'); L.textContent+=(L.textContent?'\n':'')+'['+(new Date().toLocaleTimeString())+'] '+s; L.scrollTop=L.scrollHeight; };
+function needSID(){ if(!SID){ alert('Avvia “Inizia certificazione” prima.'); return true;} return false; }
 function dataUrlFromImage(full=false){
   if (!shot.src) return null;
-  const c = document.createElement('canvas'), ctx = c.getContext('2d');
   const natW = shot.naturalWidth, natH = shot.naturalHeight;
-  if (full || rect.style.display==='none') {
-    c.width = natW; c.height = natH; ctx.drawImage(shot,0,0); 
+  const c = document.createElement('canvas'), ctx = c.getContext('2d');
+  if (full || rect.style.display==='none' || !parseFloat(rect.style.width)||!parseFloat(rect.style.height)){
+    c.width = natW; c.height = natH; ctx.drawImage(shot,0,0);
     return { dataUrl:c.toDataURL('image/png'), crop:null };
   }
   const dispW = shot.clientWidth, dispH = shot.clientHeight;
   const scaleX = natW/dispW, scaleY = natH/dispH;
   const rx = Math.round(parseFloat(rect.style.left)*scaleX);
   const ry = Math.round(parseFloat(rect.style.top )*scaleY);
-  const rw = Math.round(parseFloat(rect.style.width )*scaleX);
+  const rw = Math.round(parseFloat(rect.style.width)*scaleX);
   const rh = Math.round(parseFloat(rect.style.height)*scaleY);
-  c.width = Math.max(1,rw); c.height = Math.max(1,rh);
+  c.width=Math.max(1,rw); c.height=Math.max(1,rh);
   ctx.drawImage(shot, rx,ry,rw,rh, 0,0,c.width,c.height);
   return { dataUrl:c.toDataURL('image/png'), crop:{x:rx,y:ry,w:c.width,h:c.height,naturalW:natW,naturalH:natH} };
 }
+async function GET(q){ const u=APP+(APP.includes('?')?'&':'?')+q; const r=await fetch(u); const j=await r.json(); return j; }
+async function POST(body){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(body)}); const j=await r.json(); return j; }
 
-/* ===== Buttons & flows ===== */
-
-// Anteprima (aggiorna currentUrl dallo UI)
+/* ===== Preview ===== */
 btnPreview.onclick = ()=>{
-  currentUrl = url.value.trim();
-  if(!currentUrl){ alert('Inserisci una URL'); return; }
-  log('Anteprima impostata: '+currentUrl, 'muted');
+  currentUrl = addr.value.trim();
+  try { preview.src = currentUrl; } catch(_) { preview.srcdoc = '<p style="padding:8px;color:#a00">Anteprima non disponibile.</p>'; }
+  log('Anteprima: '+currentUrl);
 };
+btnOpen.onclick = ()=> window.open(addr.value || '#','_blank','noopener');
 
-// Inizia certificazione
+/* ===== Start / Finish ===== */
 btnStart.onclick = async ()=>{
   const clientName = client.value.trim();
-  currentUrl = url.value.trim();
-  if (!clientName){ alert('Inserisci il Cliente'); return; }
-  if (!currentUrl){ alert('Inserisci la URL'); return; }
-  if (!APP || !TOKEN){ alert('Configura app=? e t=? nell’URL.'); return; }
-
-  state.textContent = 'Avvio…'; state.className='pill';
-  const res = await fetch(APP+'?mode=start&u='+encodeURIComponent(currentUrl)+'&client='+encodeURIComponent(clientName));
-  const j   = await res.json().catch(()=>({ok:false,error:'Bad JSON'}));
-  if(!j.ok){ state.textContent='Errore'; state.className='pill err'; alert('Errore start: '+j.error); return; }
-  SID = j.sid;
-  state.textContent = 'Sessione attiva'; state.className='pill ok';
-  btnStart.disabled = true; btnFinish.disabled = false;
-
-  // abilita cattura
-  capStart.disabled=false; btnSMfull.disabled=false; btnSMview.disabled=false; btnPSI.disabled=false; btnProbe.disabled=false;
-
-  log(`Sessione creata: ${j.sessionName}`);
+  currentUrl = addr.value.trim();
+  if(!clientName){ alert('Cliente obbligatorio'); return; }
+  if(!currentUrl){ alert('URL obbligatoria'); return; }
+  setState('Avvio…');
+  const js = await GET('mode=start&t='+encodeURIComponent(TOKEN)
+    +'&u='+encodeURIComponent(currentUrl)+'&client='+encodeURIComponent(clientName)
+    +'&ua='+encodeURIComponent(navigator.userAgent||'')
+    +'&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')
+    +'&lang='+encodeURIComponent(navigator.language||'')
+    +'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)
+    +'&page='+encodeURIComponent(location.href||''));
+  if(!js.ok){ alert(js.error); setState('Errore'); return; }
+  SID = js.sessionId;
+  setState('Sessione attiva');
+  btnStart.disabled=true; btnFinish.disabled=false;
+  capStart.disabled=false; btnSMfull.disabled=false; btnSMview.disabled=false; btnPSI.disabled=false; btnSnap.disabled=false; capReset.disabled=false;
+  log('Sessione: '+js.base+' (con snapshot iniziale)');
 };
 
-// Termina certificazione
 btnFinish.onclick = async ()=>{
   if (needSID()) return;
-  state.textContent='Chiusura…'; state.className='pill';
-  const res = await fetch(APP+'?mode=finish&sid='+encodeURIComponent(SID)+'&to='+encodeURIComponent(rcpts.value||'')+'&subj='+encodeURIComponent(subj.value||''));
-  const j   = await res.json().catch(()=>({ok:false,error:'Bad JSON'}));
-  if(!j.ok){ state.textContent='Errore'; state.className='pill err'; alert('Errore finish: '+j.error); return; }
-  state.textContent='Chiuso'; state.className='pill ok';
-
-  // blocca tutto
-  [...document.querySelectorAll('button')].forEach(b=> b.disabled = true);
-  log('Manifest e ZIP pronti.');
+  setState('Chiusura…');
+  const js = await GET('mode=finish&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)
+    + (rcpts.value?('&to='+encodeURIComponent(rcpts.value)):'')
+    + (subj.value?('&subj='+encodeURIComponent(subj.value)):''));
+  if(!js.ok){ alert(js.error); setState('Errore'); return; }
+  setState('Completato');
+  document.querySelectorAll('button').forEach(b=> b.disabled = true);
+  log('ZIP pronto: '+js.zipUrl);
 };
 
-/* ---- Cattura schermo + fence ---- */
-
+/* ===== Screen capture + fence ===== */
 capStart.onclick = async ()=>{
   try{
     stream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:false });
     video.srcObject = stream; await video.play();
-    capFrame.disabled=false; capFull.disabled=false; capReset.disabled=false;
-    recStart.disabled=false;
+    capFrame.disabled=false; capFull.disabled=false; recStart.disabled=false; capReset.disabled=false;
     log('Cattura schermo attiva.');
-  }catch(e){ alert('Cattura negata: '+e.message); }
+  }catch(e){ alert('Cattura negata: '+(e.message||e)); }
 };
 
-// fence
 (function fence(){
   let drag=false, sx=0, sy=0;
-  function bounds(e){
-    const r = wrap.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX-r.left, r.width));
-    const y = Math.max(0, Math.min(e.clientY-r.top , r.height));
-    return {x,y};
-  }
+  function bounds(e){ const r=wrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
   wrap.addEventListener('pointerdown', e=>{
-    if (!shot.src) return;
-    if (e.button!==0 && e.pointerType==='mouse') return;
+    if(!shot.src) return;
+    if(e.button!==0 && e.pointerType==='mouse') return;
     e.preventDefault(); drag=true; wrap.setPointerCapture?.(e.pointerId);
     const p=bounds(e); sx=p.x; sy=p.y;
     Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px',display:'block'});
@@ -227,121 +203,105 @@ capStart.onclick = async ()=>{
     rect.style.left=Math.min(p.x,sx)+'px'; rect.style.top=Math.min(p.y,sy)+'px';
     rect.style.width=Math.abs(p.x-sx)+'px'; rect.style.height=Math.abs(p.y-sy)+'px';
   });
-  window.addEventListener('pointerup', ()=>{ drag=false; const w=parseFloat(rect.style.width)||0,h=parseFloat(rect.style.height)||0; if(w<3&&h<3){rect.style.width='160px';rect.style.height='100px';}});
-  window.addEventListener('keydown', e=>{ if(e.key==='Escape'){ rect.style.display='none'; log('Selezione annullata.','muted'); }});
+  window.addEventListener('pointerup', ()=>{ drag=false; const w=parseFloat(rect.style.width)||0,h=parseFloat(rect.style.height)||0; if(w<3&&h<3){rect.style.width='160px';rect.style.height='100px';} });
+  window.addEventListener('keydown', e=>{ if(e.key==='Escape'){ rect.style.display='none'; log('Selezione annullata'); }});
 })();
 capReset.onclick = ()=>{ rect.style.display='none'; };
 
-// scatta da <video> -> anteprima
-capFrame.onclick = async ()=>{
+capFrame.onclick = ()=>{
   if(!stream || !video.videoWidth){ alert('Stream non attivo'); return; }
   const c=document.createElement('canvas'); c.width=video.videoWidth; c.height=video.videoHeight;
   c.getContext('2d').drawImage(video,0,0);
   shot.src = c.toDataURL('image/png');
-  lastArtifact = { type:'image', dataUrl:shot.src, meta:{ provider:'screen-capture', kind:'fence' } };
+  last = { type:'image', dataUrl:shot.src, meta:{ provider:'screen-capture', label:'FRAME_CROP', dimension:`${video.videoWidth}x${video.videoHeight}` } };
   savePng.disabled=false; savePngEmail.disabled=false;
-  log('Frame acquisito: seleziona area o salva intero.');
 };
-capFull.onclick = ()=>{
-  capFrame.click(); rect.style.display='none';
-  lastArtifact.meta.kind='intero';
+capFull.onclick = ()=>{ capFrame.click(); rect.style.display='none'; last.meta.label='FRAME_FULL'; };
+
+/* ===== SM / PSI / Snapshot ===== */
+btnSMfull.onclick = async ()=>{
+  const u = (addr.value||currentUrl||'').trim(); if(!u){ alert('URL mancante'); return; }
+  setState('SM…');
+  const dim = smDim.value;
+  const js = await GET('mode=sm&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)+'&dim='+encodeURIComponent(dim));
+  if(!js.ok){ alert(js.error); setState('Errore'); return; }
+  shot.src = js.dataUrl; last = { type:'image', dataUrl:js.dataUrl, meta: js.meta, crop:null };
+  rect.style.display='none'; savePng.disabled=true; savePngEmail.disabled=true; // salvi direttamente sotto
+  await savePNG(false, /*fromSM*/true);
+  setState('Pronto'); log('SM salvato ('+dim+')');
 };
-
-/* ---- SM/PSI/Probe ---- */
-
-async function getSM(dim){ 
-  if (!currentUrl) currentUrl = url.value.trim();
-  const r = await fetch(APP+'?mode=sm&u='+encodeURIComponent(currentUrl)+'&dim='+encodeURIComponent(dim));
-  const j = await r.json(); if(!j.ok) throw new Error(j.error);
-  shot.src = j.dataUrl;
-  lastArtifact = { type:'image', dataUrl:j.dataUrl, meta:{ provider:'screenshotmachine', sourceMeta:j.meta, kind: /full/i.test(dim)?'full':'viewport' } };
-  rect.style.display='none'; savePng.disabled=false; savePngEmail.disabled=false;
-  log('SM pronto: '+dim);
-}
-btnSMfull.onclick = ()=> getSM(smDim.value);
-btnSMview.onclick = ()=> getSM(smDim.value.replace('full','1080'));
-
+btnSMview.onclick = async ()=>{
+  const u = (addr.value||currentUrl||'').trim(); if(!u){ alert('URL mancante'); return; }
+  setState('SM view…');
+  const dim = smDim.value.replace('full','1080');
+  const js = await GET('mode=sm&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)+'&dim='+encodeURIComponent(dim));
+  if(!js.ok){ alert(js.error); setState('Errore'); return; }
+  shot.src = js.dataUrl; last = { type:'image', dataUrl:js.dataUrl, meta: js.meta, crop:null };
+  rect.style.display='none'; savePng.disabled=true; savePngEmail.disabled=true;
+  await savePNG(false, true);
+  setState('Pronto'); log('SM view salvato');
+};
 btnPSI.onclick = async ()=>{
-  if (!currentUrl) currentUrl = url.value.trim();
-  const r = await fetch(APP+'?mode=psi&u='+encodeURIComponent(currentUrl));
-  const j = await r.json(); if(!j.ok) { alert('PSI: '+j.error); return; }
-  shot.src = j.dataUrl;
-  lastArtifact = { type:'image', dataUrl:j.dataUrl, meta:{ provider:'psi', sourceMeta:j.meta, kind:'intero' } };
-  rect.style.display='none'; savePng.disabled=false; savePngEmail.disabled=false;
-  log('PSI pronto.');
+  const u = (addr.value||currentUrl||'').trim(); if(!u){ alert('URL mancante'); return; }
+  setState('PSI…');
+  const js = await GET('mode=psi&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u));
+  if(!js.ok){ alert(js.error); setState('Errore'); return; }
+  shot.src = js.dataUrl; last = { type:'image', dataUrl:js.dataUrl, meta: js.meta, crop:null };
+  rect.style.display='none'; savePng.disabled=true; savePngEmail.disabled=true;
+  await savePNG(false, true);
+  setState('Pronto'); log('PSI salvato');
 };
-
-btnProbe.onclick = async ()=>{
+btnSnap.onclick = async ()=>{
   if (needSID()) return;
-  currentUrl = url.value.trim();
-  const r = await fetch(APP+'?mode=probe&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(currentUrl)+'&label=snap');
-  const j = await r.json(); if(!j.ok){ alert('Probe: '+j.error); return; }
-  log('Snapshot pagina salvato.');
+  const u = (addr.value||currentUrl||'').trim(); if(!u){ alert('URL mancante'); return; }
+  setState('Snapshot…');
+  const js = await GET('mode=snapshot&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)+'&u='+encodeURIComponent(u));
+  if(!js.ok){ alert(js.error); setState('Errore'); return; }
+  setState('Pronto'); log('Snapshot assets='+js.assets);
 };
 
-/* ---- Salvataggi PNG/VIDEO ---- */
-
-async function postSave(body){
-  const res = await fetch(APP, { method:'POST', headers:{'Content-Type':'text/plain; charset=utf-8'}, body: JSON.stringify(body) });
-  const j   = await res.json().catch(()=>({ok:false,error:'Bad JSON'}));
-  if(!j.ok) throw new Error(j.error);
-  return j;
-}
-
-savePng.onclick = async ()=>{
-  if (needSID()) return;
-  const payload = dataUrlFromImage(rect.style.display==='none'); if(!payload){ alert('Nessuna immagine.'); return; }
-  const meta = { url: currentUrl, finalUrl: currentUrl, sourceMeta: lastArtifact?.meta?.sourceMeta || {provider:lastArtifact?.meta?.provider||'screen-capture'}, crop: payload.crop, kind: payload.crop? 'fence':'intero' };
-  const body = { authToken: TOKEN, sid: SID, fileNameHint: 'shot.png', dataUrl: payload.dataUrl, sendEmail:false, meta };
-  const j = await postSave(body).catch(e=>{ alert('Errore salvataggio: '+e.message); });
-  if (j?.ok) log('PNG salvato: '+j.name);
-};
-savePngEmail.onclick = async ()=>{
-  if (needSID()) return;
-  const payload = dataUrlFromImage(rect.style.display==='none'); if(!payload){ alert('Nessuna immagine.'); return; }
-  const meta = { url: currentUrl, finalUrl: currentUrl, sourceMeta: lastArtifact?.meta?.sourceMeta || {provider:lastArtifact?.meta?.provider||'screen-capture'}, crop: payload.crop, kind: payload.crop? 'fence':'intero' };
-  const body = { authToken: TOKEN, sid: SID, fileNameHint: 'shot.png', dataUrl: payload.dataUrl, sendEmail:true, recipients: rcpts.value, subject: subj.value, meta };
-  const j = await postSave(body).catch(e=>{ alert('Errore salvataggio: '+e.message); });
-  if (j?.ok) log('PNG inviato+salvato: '+j.name);
-};
-
-/* ---- Video recording ---- */
-
+/* ===== Video ===== */
 recStart.onclick = ()=>{
-  if(!stream){ alert('Avvia cattura schermo prima'); return; }
-  mediaRec = new MediaRecorder(stream, { mimeType:'video/webm;codecs=vp9' });
-  chunks=[]; mediaRec.ondataavailable=e=>{ if(e.data.size>0) chunks.push(e.data); };
-  mediaRec.onstop = async ()=>{
-    const blob = new Blob(chunks, {type:'video/webm'});
-    const reader = new FileReader();
-    reader.onload = async ()=>{
-      const dataUrl = reader.result; // data:video/webm;base64,...
-      lastArtifact = { type:'video', dataUrl, meta:{provider:'screen-record'} };
-      saveVideo.disabled=false;
-      log('Video pronto per il salvataggio.');
-    };
-    reader.readAsDataURL(blob);
+  if(!stream){ alert('Avvia cattura schermo'); return; }
+  chunks=[]; mediaRec = new MediaRecorder(stream, { mimeType:'video/webm;codecs=vp9' });
+  mediaRec.ondataavailable = e=>{ if(e.data.size>0) chunks.push(e.data); };
+  mediaRec.onstop = ()=>{
+    const blob = new Blob(chunks,{type:'video/webm'});
+    const fr = new FileReader(); fr.onload=()=>{ last={type:'video', dataUrl:String(fr.result), meta:{provider:'screen-record', label:'RECORDING'}}; saveVideo.disabled=false; log('Video pronto'); };
+    fr.readAsDataURL(blob);
   };
-  mediaRec.start(); recState.textContent='REC'; recState.className='pill';
-  recStart.disabled=true; recStop.disabled=false;
-  log('Registrazione avviata.');
+  mediaRec.start(); recStart.disabled=true; recStop.disabled=false; recState.textContent='REC';
 };
-recStop.onclick = ()=>{
-  mediaRec?.stop(); recState.textContent='idle'; recState.className='pill muted';
-  recStart.disabled=false; recStop.disabled=true;
-  log('Registrazione fermata.');
-};
+recStop.onclick = ()=>{ if(mediaRec && mediaRec.state!=='inactive') mediaRec.stop(); recStart.disabled=false; recStop.disabled=true; recState.textContent='idle'; };
+
+/* ===== Save helpers ===== */
+async function savePNG(email=false, direct=false){
+  if (needSID()) return;
+  let payload;
+  if (!direct){
+    payload = dataUrlFromImage(rect.style.display==='none');
+    if(!payload){ alert('Nessuna immagine.'); return; }
+  }else{
+    payload = { dataUrl: last.dataUrl, crop:null };
+  }
+  const meta = { url: addr.value.trim(), finalUrl: addr.value.trim(), canonical:'', sourceMeta: last.meta || {provider:'screen-capture',label:'FRAME'}, crop: payload.crop };
+  const js = await POST({ authToken:TOKEN, sid:SID, fileNameHint:'shot.png', dataUrl:payload.dataUrl, sendEmail:email, recipients:rcpts.value||undefined, subject:subj.value||undefined, meta });
+  if(!js.ok){ alert(js.error); return; }
+  log('PNG salvato: '+js.name+' sha='+js.sha256);
+}
+savePng.onclick = ()=> savePNG(false,false);
+savePngEmail.onclick = ()=> savePNG(true,false);
 
 saveVideo.onclick = async ()=>{
   if (needSID()) return;
-  if (!lastArtifact || lastArtifact.type!=='video'){ alert('Nessun video pronto.'); return; }
-  const body = { authToken:TOKEN, sid:SID, fileNameHint:'rec.webm', dataUrl:lastArtifact.dataUrl, sendEmail:false, meta:{ url:currentUrl, finalUrl:currentUrl, sourceMeta:{provider:'screen-record'} } };
-  const j = await postSave(body).catch(e=> alert('Errore video: '+e.message));
-  if (j?.ok) log('VIDEO salvato: '+j.name);
+  if (last.type!=='video'){ alert('Nessun video pronto'); return; }
+  const js = await POST({ authToken:TOKEN, sid:SID, fileNameHint:'rec.webm', dataUrl:last.dataUrl, sendEmail:false, meta:{ url:addr.value.trim(), finalUrl:addr.value.trim(), sourceMeta:{provider:'screen-record', label:'RECORDING'} } });
+  if(!js.ok){ alert(js.error); return; }
+  log('VIDEO salvato: '+js.name+' sha='+js.sha256); saveVideo.disabled=true;
 };
 
-/* ===== UX piccoli ===== */
-url.addEventListener('change', ()=>{ currentUrl = url.value.trim(); });
+/* ===== Fence helpers ===== */
+capReset.onclick = ()=>{ rect.style.display='none'; log('Selezione rimossa'); };
 </script>
 </body>
 </html>
