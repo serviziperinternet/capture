@@ -1,87 +1,96 @@
 <!doctype html>
 <html lang="it">
 <head>
-<meta charset="utf-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
 <title>Web Evidence – Cattura</title>
 <style>
-  :root { --accent:#0a7cff; }
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0}
-  header{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid #eee;padding:10px;position:sticky;top:0;background:#fff;z-index:10}
-  input,select,button{padding:8px;border:1px solid #ddd;border-radius:8px;background:#fafafa}
-  button.primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+  header{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid #eee;padding:10px}
+  button,input,select{padding:8px;border:1px solid #ddd;border-radius:8px;background:#fafafa}
   button[disabled]{opacity:.5;cursor:not-allowed}
-  #status{font-size:12px;color:#444;margin-left:auto}
+  #status{margin-left:auto;font-size:12px;color:#555}
   #work{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:10px}
   video,canvas{width:100%;background:#000;border-radius:8px}
   #cropWrap{position:relative;user-select:none;-webkit-user-select:none}
-  #img{max-width:100%;display:block;-webkit-user-drag:none;user-drag:none}
+  #img{max-width:100%;display:none;-webkit-user-drag:none;user-drag:none}
   #rect{position:absolute;border:2px dashed #000;background:rgba(0,0,0,.12);display:none;pointer-events:none}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-  .toast{position:fixed;right:12px;bottom:12px;background:#222;color:#fff;padding:10px 12px;border-radius:10px;opacity:.95}
 </style>
 </head>
 <body>
 <header>
-  <input id="addr" type="url" placeholder="https://…" style="min-width:340px">
-  <select id="smDim">
-    <option>1366xfull</option><option selected>1920xfull</option><option>2560xfull</option><option>3840xfull</option>
-    <option disabled>──────────</option>
-    <option>1366x768</option><option>1600x900</option><option>1920x1080</option><option>2560x1440</option><option>3840x2160</option>
-  </select>
-  <button id="btnStartCert" class="primary">Inizia certificazione</button>
-  <button id="btnFinishCert" disabled>Termina certificazione</button>
-  <button id="btnPSI">PSI</button>
-  <button id="btnSM">SM full-page</button>
+  <input id="addr" type="url" placeholder="https://…" style="min-width:340px" />
+  <button id="btnStartCert" title="Crea cartella sessione e manifesto iniziale">Inizia certificazione</button>
+  <button id="btnFinishCert" disabled title="Crea ZIP + invio email e blocca la sessione">Termina certificazione</button>
+
   <button id="start">Avvia cattura</button>
   <button id="freeze" disabled>Scatta frame</button>
-  <button id="resetSel" disabled>Reset selezione</button>
-  <span id="status">pronto</span>
+  <button id="btnFullFrame" disabled>Scatta TUTTO (ignora selezione)</button>
+
+  <label>SM:</label>
+  <select id="smDim">
+    <option>1366xfull</option>
+    <option selected>1920xfull</option>
+    <option>2560xfull</option>
+    <option>3840xfull</option>
+    <option disabled>──────────</option>
+    <option>1366x768</option>
+    <option>1600x900</option>
+    <option>1920x1080</option>
+    <option>2560x1440</option>
+    <option>3840x2160</option>
+  </select>
+  <button id="btnSMFull"  title="ScreenshotMachine full/viewport">SM full</button>
+  <button id="btnSMView"  title="ScreenshotMachine viewport">SM viewport</button>
+  <button id="btnPSI"     title="PageSpeed screenshot">PSI</button>
+
+  <span id="status">Pronto</span>
 </header>
 
-<div class="row" style="padding:8px 10px">
-  <label>Destinatari:</label><input id="rcpts" type="text" placeholder="a@pec.it, b@example.com" style="min-width:280px">
-  <label>Oggetto:</label><input id="subj" type="text" placeholder="Web Evidence – Screenshot" style="min-width:260px">
-  <button id="save" disabled>Salva PNG (fence/intero)</button>
-  <button id="send" disabled>Salva+Email</button>
+<div class="row" style="padding:0 10px 8px">
+  <label>Destinatari:</label><input id="rcpts" type="text" placeholder="a@pec.it, b@example.com">
+  <label>Oggetto:</label><input id="subj" type="text" placeholder="Web Evidence – Screenshot">
+  <button id="save" disabled>Salva (fence)</button>
+  <button id="send" disabled>Salva + Email (fence)</button>
+  <button id="clearSel" title="Pulisci selezione">Pulisci selezione</button>
 </div>
 
 <div id="work">
-  <div><video id="video" autoplay playsinline></video></div>
-  <div id="cropWrap"><img id="img" alt="frame"><div id="rect"></div></div>
+  <div>
+    <video id="video" autoplay playsinline></video>
+  </div>
+  <div id="cropWrap">
+    <img id="img" alt="frame"/>
+    <div id="rect"></div>
+  </div>
 </div>
 
 <script>
-const q     = new URLSearchParams(location.search);
-const APP   = q.get('app') || '';     // URL Web App /exec
-const TOKEN = q.get('t')   || '';     // = DATA!B7
-let   CURRENT = q.get('u') || '';     // URL indagata
+/* ======== Setup e util ======== */
+const q = new URLSearchParams(location.search);
+const APP   = q.get('app') || '';
+const TOKEN = q.get('t')   || '';
+let   CURRENT = q.get('u') || '';
 
-const el = (id)=>document.getElementById(id);
-const status = (s)=>{ el('status').textContent = s; };
-const toast  = (s)=>{ const d=document.createElement('div'); d.className='toast'; d.textContent=s; document.body.appendChild(d); setTimeout(()=>d.remove(),3000); };
+const PRE_TO   = q.get('to')   || '';
+const PRE_SUBJ = q.get('subj') || '';
 
-el('addr').value = CURRENT;
+const session = { id:'', base:'' };
+function el(id){ return document.getElementById(id); }
+function status(msg){ el('status').textContent = msg; }
 
-let session = { id:'', folderUrl:'' };
-let stream = null;
-
-/* ============ Helper fetch verso Apps Script ============ */
-async function callGet(params){
-  const url = APP + (APP.includes('?')?'&':'?') + params;
-  const r = await fetch(url, { method:'GET' });
-  if (!r.ok) throw new Error('HTTP '+r.status);
-  return await r.json();
-}
-async function callPost(body){
-  const r = await fetch(APP, { method:'POST', headers:{'Content-Type':'text/plain; charset=utf-8'}, body: JSON.stringify(body) });
-  if (!r.ok){ const t=await r.text().catch(()=> ''); throw new Error('HTTP '+r.status+' '+t.slice(0,200)); }
-  return await r.json();
+/* ======== Stato UI ======== */
+function setButtonsRunning(running){
+  // durante un'azione disabilita pulsanti principali
+  ['start','freeze','btnFullFrame','btnSMFull','btnSMView','btnPSI','save','send'].forEach(id=>{
+    const b = el(id); if (b) b.disabled = running || (id!=='start' && !session.id && id!=='btnSMFull' && id!=='btnSMView' && id!=='btnPSI');
+  });
 }
 
-/* ============ Fence (pointer events, no “puntino”) ============ */
-(function(){
-  const wrap = el('cropWrap'), rect = el('rect'), img = el('img');
+/* ======== Fence migliorata con Pointer Events ======== */
+const wrap = el('cropWrap'), img = el('img'), rect = el('rect');
+(function initFence(){
   let dragging=false, sx=0, sy=0;
   function bounds(e){
     const r = wrap.getBoundingClientRect();
@@ -89,150 +98,275 @@ async function callPost(body){
     const y = Math.max(0, Math.min(e.clientY - r.top , r.height));
     return {x,y};
   }
-  wrap.addEventListener('pointerdown', e=>{
+  function onDown(e){
     if (!img.src) return;
     if (e.button!==0 && e.pointerType==='mouse') return;
     e.preventDefault();
-    dragging=true; const p=bounds(e); sx=p.x; sy=p.y;
+    wrap.setPointerCapture?.(e.pointerId);
+    dragging = true;
+    const p = bounds(e);
+    sx=p.x; sy=p.y;
     Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px',display:'block'});
-    el('resetSel').disabled=false;
-    function onMove(ev){ if(!dragging) return; const p=bounds(ev);
-      rect.style.left=Math.min(p.x,sx)+'px'; rect.style.top=Math.min(p.y,sy)+'px';
-      rect.style.width=Math.abs(p.x-sx)+'px'; rect.style.height=Math.abs(p.y-sy)+'px';
-    }
-    function onUp(){ dragging=false; document.removeEventListener('pointermove', onMove); if((+rect.style.width.replace('px','')||0)<3 && (+rect.style.height.replace('px','')||0)<3){ rect.style.width='120px'; rect.style.height='80px'; } }
-    document.addEventListener('pointermove', onMove); document.addEventListener('pointerup', onUp, {once:true});
-  });
-  el('resetSel').onclick=()=>{ rect.style.display='none'; rect.style.width=rect.style.height='0px'; el('resetSel').disabled=true; toast('Selezione cancellata'); };
+    document.addEventListener('pointermove', onMove);
+    document.addEventListener('pointerup', onUp, {once:true});
+  }
+  function onMove(e){
+    if(!dragging) return;
+    const p = bounds(e);
+    rect.style.left   = Math.min(p.x, sx) + 'px';
+    rect.style.top    = Math.min(p.y, sy) + 'px';
+    rect.style.width  = Math.abs(p.x - sx) + 'px';
+    rect.style.height = Math.abs(p.y - sy) + 'px';
+  }
+  function onUp(){
+    dragging=false;
+    document.removeEventListener('pointermove', onMove);
+    const w = parseFloat(rect.style.width)||0, h=parseFloat(rect.style.height)||0;
+    if (w<3 && h<3) { rect.style.width='120px'; rect.style.height='80px'; }
+  }
+  wrap.addEventListener('pointerdown', onDown);
 })();
+el('clearSel').onclick = ()=>{ rect.style.display='none'; rect.style.width='0px'; rect.style.height='0px'; };
 
-/* ============ Crop → dataURL ============ */
+/* ======== Util: dai IMG + fence → dataURL PNG ======== */
 function buildCrop(){
-  const img = el('img'), rect = el('rect');
   if (!img.src) return null;
   const naturalW = img.naturalWidth, naturalH = img.naturalHeight;
   const dispW = img.clientWidth || naturalW, dispH = img.clientHeight || naturalH;
 
-  const hasSel = rect.style.display!=='none' && (+rect.style.width.replace('px','')||0)>1 && (+rect.style.height.replace('px','')||0)>1;
+  const hasSel = rect.style.display !== 'none' &&
+                 (parseFloat(rect.style.width)||0) > 1 &&
+                 (parseFloat(rect.style.height)||0) > 1;
 
-  const c = document.createElement('canvas'), ctx = c.getContext('2d');
-  if (!hasSel){
-    c.width=naturalW; c.height=naturalH; ctx.drawImage(img,0,0);
-    return { dataUrl: c.toDataURL('image/png'), crop:{x:0,y:0,w:naturalW,h:naturalH,naturalW,naturalH}, label:'Intero' };
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+
+  if (!hasSel) {
+    c.width = naturalW; c.height = naturalH;
+    ctx.drawImage(img, 0, 0);
+    return { dataUrl: c.toDataURL('image/png'),
+             crop: {x:0,y:0,w:naturalW,h:naturalH,naturalW,naturalH} };
   }
-  const scaleX = naturalW/dispW, scaleY = naturalH/dispH;
-  const rx = Math.round(parseFloat(rect.style.left)*scaleX);
-  const ry = Math.round(parseFloat(rect.style.top )*scaleY);
-  const rw = Math.round(parseFloat(rect.style.width)*scaleX);
-  const rh = Math.round(parseFloat(rect.style.height)*scaleY);
-  c.width=Math.max(1,rw); c.height=Math.max(1,rh);
-  ctx.drawImage(img, rx,ry,rw,rh, 0,0,c.width,c.height);
-  return { dataUrl:c.toDataURL('image/png'), crop:{x:rx,y:ry,w:c.width,h:c.height,naturalW,naturalH}, label:'Fence' };
+
+  const scaleX = naturalW / dispW, scaleY = naturalH / dispH;
+  const rx = Math.round(parseFloat(rect.style.left) * scaleX);
+  const ry = Math.round(parseFloat(rect.style.top)  * scaleY);
+  const rw = Math.round(parseFloat(rect.style.width)* scaleX);
+  const rh = Math.round(parseFloat(rect.style.height)* scaleY);
+
+  c.width  = Math.max(1, rw);
+  c.height = Math.max(1, rh);
+  ctx.drawImage(img, rx, ry, rw, rh, 0, 0, c.width, c.height);
+
+  return { dataUrl: c.toDataURL('image/png'),
+           crop: {x:rx, y:ry, w:c.width, h:c.height, naturalW, naturalH} };
 }
 
-/* ============ START / FINISH sessione ============ */
+/* ======== Chiamate al backend ======== */
+async function callGet(qs){
+  const r = await fetch(`${APP}?${qs}`, {method:'GET'});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  return r.json();
+}
+async function callPost(body){
+  const r = await fetch(APP, {method:'POST', headers:{'Content-Type':'text/plain; charset=utf-8'}, body: JSON.stringify(body)});
+  if(!r.ok) throw new Error('HTTP '+r.status);
+  return r.json();
+}
+
+/* ======== Inizia/Termina certificazione ======== */
 el('btnStartCert').onclick = async ()=>{
   try{
-    el('btnStartCert').disabled=true; status('creazione sessione…');
-    CURRENT = el('addr').value.trim() || CURRENT;
-    const js = await callGet(`mode=start&t=${encodeURIComponent(TOKEN)}&u=${encodeURIComponent(CURRENT)}`);
-    if (!js.ok) throw new Error(js.error||'start failed');
-    session.id = js.sessionId; session.folderUrl = js.folderUrl;
+    if (session.id) return;
+    el('btnStartCert').disabled = true;
+    status('Creo sessione…');
+    const addr = (el('addr').value || '').trim();
+    CURRENT = addr || CURRENT;
+
+    const js = await callGet(
+      'mode=start'
+      + '&t='  + encodeURIComponent(TOKEN)
+      + '&u='  + encodeURIComponent(CURRENT)
+      + '&ua=' + encodeURIComponent(navigator.userAgent||'')
+      + '&tz=' + encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')
+      + '&lang=' + encodeURIComponent(navigator.language||'')
+      + '&vw=' + innerWidth + '&vh=' + innerHeight
+      + '&sw=' + screen.width + '&sh=' + screen.height
+    );
+    if(!js.ok) throw new Error(js.error||'start failed');
+    session.id = js.sessionId; session.base = js.base;
     el('btnFinishCert').disabled = false;
-    toast('Sessione creata: ' + js.folderName);
-    status('sessione pronta');
+    status('Sessione attiva');
   }catch(e){
-    alert('Errore start: ' + e.message);
-  }finally{
-    el('btnStartCert').disabled=false;
+    alert('Errore start: '+e.message);
+    el('btnStartCert').disabled = false;
+    status('Errore');
   }
 };
 
 el('btnFinishCert').onclick = async ()=>{
-  if (!session.id){ alert('Nessuna sessione avviata'); return; }
+  if (!session.id){ alert('Nessuna sessione attiva'); return; }
   try{
-    el('btnFinishCert').disabled=true; status('creo ZIP e invio PEC…');
+    el('btnFinishCert').disabled = true;
+    // blocca ogni azione
+    ['start','freeze','btnFullFrame','btnSMFull','btnSMView','btnPSI','save','send','btnStartCert'].forEach(id=>{
+      const b = el(id); if (b) b.disabled = true;
+    });
+    status('Creo ZIP e invio…');
     const to = encodeURIComponent(el('rcpts').value.trim() || '');
-    const js = await callGet(`mode=finish&t=${encodeURIComponent(TOKEN)}&id=${encodeURIComponent(session.id)}&to=${to}`);
-    if (!js.ok) throw new Error(js.error||'finish failed');
-    toast('ZIP creato e PEC inviata'); status('completato');
+    const js = await callGet(`mode=finish&t=${encodeURIComponent(TOKEN)}&id=${encodeURIComponent(session.id)}&sid=${encodeURIComponent(session.id)}&to=${to}`);
+    if(!js.ok) throw new Error(js.error||'finish failed');
+    alert('Sessione terminata.\nZIP: '+js.zipUrl);
+    status('Completato');
   }catch(e){
-    alert('Errore finish: ' + e.message);
-    el('btnFinishCert').disabled=false;
+    alert('Errore finish: '+e.message);
+    el('btnFinishCert').disabled = false;
+    status('Errore');
   }
 };
 
-/* ============ SM / PSI (server-side) ============ */
-el('btnSM').onclick = async ()=>{
-  try{
-    status('SM full-page…'); const u=(el('addr').value||CURRENT).trim();
-    const js = await callGet(`mode=sm&u=${encodeURIComponent(u)}&dim=${encodeURIComponent(el('smDim').value)}`);
-    if (!js.ok) throw new Error(js.error);
-    el('img').src = js.dataUrl;
-    el('save').disabled = el('send').disabled = false;
-    toast('SM pronto'); status('pronto');
-  }catch(e){ alert('Errore SM: '+e.message); status('errore'); }
-};
-
-el('btnPSI').onclick = async ()=>{
-  try{
-    status('PSI…'); const u=(el('addr').value||CURRENT).trim();
-    const js = await callGet(`mode=psi&u=${encodeURIComponent(u)}`);
-    if (!js.ok) throw new Error(js.error);
-    el('img').src = js.dataUrl;
-    el('save').disabled = el('send').disabled = false;
-    toast('PSI pronto'); status('pronto');
-  }catch(e){ alert('Errore PSI: '+e.message); status('errore'); }
-};
-
-/* ============ Screen capture (video->frame) ============ */
+/* ======== Cattura schermo: start + freeze ======== */
 const video = el('video');
+let stream = null;
+
+async function ensureVideoReady(){
+  if (!video.srcObject) return false;
+  if (video.readyState >= 2 && video.videoWidth > 0) return true;
+  await new Promise(res=> video.addEventListener('loadedmetadata', ()=>res(), {once:true}) );
+  return video.videoWidth > 0;
+}
+
 el('start').onclick = async ()=>{
   try{
-    stream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
+    setButtonsRunning(true);
+    stream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:false });
     video.srcObject = stream; await video.play();
+    const ok = await ensureVideoReady();
+    if (!ok) throw new Error('Stream non pronto');
     el('freeze').disabled = false;
-    status('condivisione attiva');
-  }catch(e){ alert('Cattura negata: '+e.message); }
+    el('btnFullFrame').disabled = false;
+    status('Cattura attiva');
+  }catch(e){
+    alert('Cattura negata o non disponibile: ' + (e.message||e));
+  }finally{
+    setButtonsRunning(false);
+  }
 };
+
 el('freeze').onclick = async ()=>{
   if (!stream || !video.videoWidth){ alert('Stream non attivo'); return; }
   try{
-    const c=document.createElement('canvas'); c.width=video.videoWidth; c.height=video.videoHeight;
-    c.getContext('2d').drawImage(video,0,0);
-    el('img').src = c.toDataURL('image/png');
+    setButtonsRunning(true);
+    const vw = video.videoWidth, vh = video.videoHeight;
+    const c = document.createElement('canvas'); c.width = vw; c.height = vh;
+    c.getContext('2d').drawImage(video, 0, 0, vw, vh);
+    const dataUrl = c.toDataURL('image/png');
+    img.src = dataUrl; img.style.display = 'block';
     el('save').disabled = el('send').disabled = false;
-    toast('Frame acquisito');
-  }catch(e){ alert('Errore scatto: ' + e.message); }
+    status('Frame pronto');
+    // etichetta predefinita per “fullframe”
+    window.__lastLabel = 'fullframe'; window.__lastDim = 'na';
+  }catch(e){
+    alert('Errore scatto: '+(e.message||e));
+  }finally{
+    setButtonsRunning(false);
+  }
 };
 
-/* ============ SALVA (Drive/PEC) ============ */
-async function sendSave(sendEmail){
-  if (!session.id){ alert('Prima “Inizia certificazione”'); return; }
+/* ======== SM / PSI ======== */
+async function loadSM(dim, label){
+  const u = (el('addr').value || CURRENT || '').trim();
+  if(!u){ alert('Inserisci una URL'); return; }
+  try{
+    setButtonsRunning(true); status(`SM ${dim}…`);
+    const js = await callGet(`mode=sm&u=${encodeURIComponent(u)}&dim=${encodeURIComponent(dim)}`);
+    if(!js.ok) throw new Error(js.error||'SM failed');
+    img.src = js.dataUrl; img.style.display = 'block';
+    el('save').disabled = el('send').disabled = false;
+    window.__lastLabel = label; window.__lastDim = dim; // es. 'SM_full' / 'SM_view'
+    status('SM pronto');
+  }catch(e){
+    alert('Errore SM: '+e.message);
+    status('Errore');
+  }finally{
+    setButtonsRunning(false);
+  }
+}
+el('btnSMFull').onclick = ()=> loadSM(el('smDim').value || '1920xfull', 'SM_full');
+el('btnSMView').onclick = ()=> {
+  // “viewport” = una dimensione fissa, esempio 1920x1080
+  const dim = '1920x1080';
+  loadSM(dim, 'SM_viewport');
+};
+
+el('btnPSI').onclick = async ()=>{
+  const u = (el('addr').value || CURRENT || '').trim();
+  if(!u){ alert('Inserisci una URL'); return; }
+  try{
+    setButtonsRunning(true); status('PSI…');
+    const js = await callGet(`mode=psi&u=${encodeURIComponent(u)}`);
+    if(!js.ok) throw new Error(js.error||'PSI failed');
+    img.src = js.dataUrl; img.style.display = 'block';
+    el('save').disabled = el('send').disabled = false;
+    window.__lastLabel = 'PSI'; window.__lastDim = js.meta?.dimension || 'na';
+    status('PSI pronto');
+  }catch(e){
+    alert('Errore PSI: '+e.message);
+    status('Errore');
+  }finally{
+    setButtonsRunning(false);
+  }
+};
+
+/* ======== Salvataggi ======== */
+async function sendSave(sendEmail, forceLabel){
+  if (!session.id){ alert('Prima avvia la certificazione'); return; }
   const payload = buildCrop(); if(!payload){ alert('Nessuna immagine'); return; }
+
+  const label = forceLabel || (window.__lastLabel || (payload.crop && payload.crop.x===0 && payload.crop.y===0 ? 'fullframe' : 'fence'));
+  const dim   = window.__lastDim || 'na';
+  const addr  = (el('addr').value || CURRENT || '').trim();
+
   const body = {
-    authToken: TOKEN, sessionId: session.id,
+    authToken: TOKEN,
+    sessionId: session.id,
     fileNameHint: `capture_${Date.now()}.png`,
-    dataUrl: payload.dataUrl, sendEmail,
+    dataUrl: payload.dataUrl,
+    sendEmail,
     recipients: el('rcpts').value.trim() || undefined,
-    subject:    el('subj').value.trim()  || undefined,
+    subject: el('subj').value.trim() || undefined,
     meta: {
-      url: el('addr').value.trim() || CURRENT,
-      finalUrl: el('addr').value.trim() || CURRENT,
-      sourceMeta: { provider:'screen-capture', dimension:'na', label: payload.label },
-      crop: payload.crop
+      url: addr, finalUrl: addr, canonical: '',
+      sourceMeta: { provider: (label.startsWith('SM')?'screenshotmachine': (label==='PSI'?'psi':'screen-capture')), dimension: dim, label },
+      crop: (label==='fullframe') ? null : payload.crop
     }
   };
+
   try{
-    el('save').disabled = el('send').disabled = true; status('salvataggio…');
+    setButtonsRunning(true); status('Salvataggio…');
     const js = await callPost(body);
-    if (!js.ok) throw new Error(js.error||'save failed');
-    toast('Salvato: ' + js.name); status('pronto');
-  }catch(e){ alert('Errore salvataggio: ' + e.message); status('errore'); }
-  finally{ el('save').disabled = el('send').disabled = false; }
+    if(!js.ok) throw new Error(js.error||'save failed');
+    alert((sendEmail?'Inviato & salvato: ':'Salvato: ')+js.name+'\nSHA-256: '+js.sha256+'\nCartella: '+js.folderUrl);
+    status('Pronto');
+  }catch(e){
+    alert('Errore salvataggio: '+e.message);
+    status('Errore');
+  }finally{
+    setButtonsRunning(false);
+  }
 }
-el('save').onclick = ()=> sendSave(false);
-el('send').onclick = ()=> sendSave(true);
+
+el('save').onclick = ()=> sendSave(false, 'fence');
+el('send').onclick = ()=> sendSave(true,  'fence');
+el('btnFullFrame').onclick = ()=> sendSave(false, 'fullframe');
+
+/* ======== Boot ======== */
+window.addEventListener('load', ()=>{
+  el('addr').value = CURRENT || '';
+  el('rcpts').value = PRE_TO   || '';
+  el('subj').value  = PRE_SUBJ || 'Web Evidence – Screenshot';
+  status('Pronto');
+});
 </script>
 </body>
 </html>
