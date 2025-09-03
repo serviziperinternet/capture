@@ -7,13 +7,13 @@
 <style>
   :root{--bd:#ddd;--accent:#0b5cff;--mut:#666}
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0}
-  header{display:grid;grid-template-columns:180px 1fr auto auto 200px 1fr auto auto;gap:8px;align-items:center;border-bottom:1px solid #eee;padding:10px}
+  header{display:grid;grid-template-columns:170px 1fr auto auto 240px 1fr auto auto;gap:8px;align-items:center;border-bottom:1px solid #eee;padding:10px}
   input,select,button{padding:8px;border:1px solid var(--bd);border-radius:8px;background:#fafafa}
   button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
   button[disabled]{opacity:.55;cursor:not-allowed}
   button[data-on="1"]{box-shadow:0 0 0 3px rgba(11,92,255,.2)}
   #state{justify-self:end;font-size:12px;color:#222;background:#f3f4f6;border-radius:999px;padding:.25rem .6rem}
-  .toolbar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid #f0f0f0}
+  .bar{display:flex;gap:8px;flex-wrap:wrap;padding:8px 10px;border-bottom:1px solid #f0f0f0}
   #work{display:grid;grid-template-columns:1.2fr .8fr;gap:10px;padding:10px}
   video{width:100%;background:#000;border-radius:8px;height:75vh}
   #cropWrap{position:relative;user-select:none;-webkit-user-select:none}
@@ -28,23 +28,25 @@
 <header>
   <input id="client" placeholder="Cliente…" />
   <input id="addr" type="url" placeholder="https://…" />
-  <button id="btnPreview" class="primary">Anteprima (condivisione)</button>
   <button id="btnOpen">Apri scheda</button>
+  <button id="btnPreview" class="primary">Anteprima (seleziona finestra)</button>
+
   <input id="rcpts" placeholder="Destinatari PEC/email" />
   <input id="subj"  value="Web Evidence – Screenshot" />
   <button id="btnStart">Inizia certificazione</button>
   <button id="btnFinish" disabled>Termina</button>
+
   <span id="state">Pronto</span>
 </header>
 
-<div class="toolbar">
+<div class="bar">
   <button id="capFrame"  disabled>Scatta frame (selezione)</button>
   <button id="capFull"   disabled>Scatta intero</button>
   <button id="capReset"  disabled>Annulla selezione</button>
 
   <span style="margin-left:16px">
     <label>SM:</label>
-    <select id="smDim">
+    <select id="smDim" disabled>
       <option>1366xfull</option><option selected>1920xfull</option><option>2560xfull</option><option>3840xfull</option>
       <option disabled>──────────</option>
       <option>1366x768</option><option>1600x900</option><option>1920x1080</option><option>2560x1440</option><option>3840x2160</option>
@@ -56,6 +58,8 @@
   </span>
 
   <span style="margin-left:auto">
+    <button id="recStart" disabled>REC</button>
+    <button id="recStop"  disabled>Stop</button>
     <button id="savePng"  disabled>Salva PNG</button>
     <button id="savePngEmail" disabled>Salva+Email</button>
     <button id="saveVideo" disabled>Salva VIDEO</button>
@@ -74,59 +78,73 @@
 <div id="log"></div>
 
 <script>
-/* ---------- Parametri ---------- */
+/* ===== Query ===== */
 const qs=new URLSearchParams(location.search);
 const APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
-const DEFU=qs.get('u')||'', DEFC=qs.get('client')||'', DEFT=qs.get('to')||'', DEFS=qs.get('subj')||'';
-client.value=DEFC||''; addr.value=DEFU||''; rcpts.value=DEFT||''; if(DEFS) subj.value=DEFS;
+if(qs.get('u')) addr.value=qs.get('u');
+if(qs.get('client')) client.value=qs.get('client');
+if(qs.get('to')) rcpts.value=qs.get('to');
+if(qs.get('subj')) subj.value=qs.get('subj');
 
-/* ---------- Stato ---------- */
+/* ===== Stato ===== */
 let SID=''; let currentUrl=(addr.value||'').trim();
-let stream=null, mediaRec=null, chunks=[];
-let last={type:'',dataUrl:'',meta:null,crop:null};
-const video=document.getElementById('video'), img=document.getElementById('img'), rect=document.getElementById('rect'), wrap=document.getElementById('cropWrap');
+let stream=null, rec=null, chunks=[];
+let imgLast=null;
 
-/* ---------- Utils ---------- */
-const setState = s => document.getElementById('state').textContent=s;
-const log = s => { const L=document.getElementById('log'); L.textContent+=(L.textContent?'\n':'')+'['+(new Date().toLocaleTimeString())+'] '+s; L.scrollTop=L.scrollHeight; };
-const mark = (btn,on)=>{ if(!btn) return; btn.dataset.on = on?'1':'0'; };
-async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); return r.json(); }
-async function POST(body){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(body)}); return r.json(); }
-function needSID(){ if(!SID){ alert('Avvia “Inizia certificazione” prima.'); return true;} return false; }
-function hostFrom(u){ try{ return new URL(u).hostname; }catch(_){ return ''; } }
-function dataUrlFromImage(full=false){
-  if(!img.src) return null;
-  const natW=img.naturalWidth, natH=img.naturalHeight;
-  const c=document.createElement('canvas'), ctx=c.getContext('2d');
-  if(full || rect.style.display==='none' || !parseFloat(rect.style.width)||!parseFloat(rect.style.height)){
-    c.width=natW; c.height=natH; ctx.drawImage(img,0,0); return {dataUrl:c.toDataURL('image/png'), crop:null};
-  }
-  const dispW=img.clientWidth, dispH=img.clientHeight;
-  const rx=Math.round(parseFloat(rect.style.left)*natW/dispW);
-  const ry=Math.round(parseFloat(rect.style.top )*natH/dispH);
-  const rw=Math.round(parseFloat(rect.style.width)*natW/dispW);
-  const rh=Math.round(parseFloat(rect.style.height)*natH/dispH);
-  c.width=Math.max(1,rw); c.height=Math.max(1,rh);
-  ctx.drawImage(img,rx,ry,rw,rh,0,0,c.width,c.height);
-  return {dataUrl:c.toDataURL('image/png'), crop:{x:rx,y:ry,w:c.width,h:c.height,naturalW:natW,naturalH:natH}};
+const $ = id => document.getElementById(id);
+const video=$('video'), img=$('img'), rect=$('rect'), wrap=$('cropWrap');
+
+/* ===== UI helpers ===== */
+const setState = s => $('state').textContent=s;
+const log = s => { const L=$('log'); L.textContent+=(L.textContent?'\n':'')+'['+(new Date().toLocaleTimeString())+'] '+s; L.scrollTop=L.scrollHeight; setState(s); };
+async function note(type, data={}){
+  if(!SID) return;
+  const q='mode=note&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)
+        +'&msg='+encodeURIComponent(type+' '+JSON.stringify(data))+'&ua='+encodeURIComponent(navigator.userAgent||'');
+  try{ await fetch(APP+(APP.includes('?')?'&':'?')+q); }catch(_){}
+}
+function host(u){ try{ return new URL(u).hostname; }catch(_){ return ''; } }
+function hasStream(){ return !!(video.srcObject && video.videoWidth); }
+
+/* Abilitazioni centralizzate */
+function updateUI(){
+  const s = !!SID, v = hasStream();
+  // scatto/rec: serve sessione + stream
+  ['capFrame','capFull','capReset','recStart'].forEach(id=> $(id).disabled = !(s && v));
+  // SM/PSI/Snapshot: serve sessione (stream non obbligatorio)
+  ['smDim','btnSMfull','btnSMview','btnPSI','btnSnap'].forEach(id=> $(id).disabled = !s);
+  // salvataggi: PNG disponibile solo dopo uno scatto; video dopo uno stop
+  $('savePng').disabled = !img.classList.contains('hasSrc');
+  $('savePngEmail').disabled = $('savePng').disabled;
+  $('saveVideo').disabled = !('lastVideoB64' in window);
+  $('btnFinish').disabled = !s;
 }
 
-/* ---------- Anteprima = condivisione schermo ---------- */
-btnPreview.onclick = async ()=>{
+/* ===== chiamate ===== */
+async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); return r.json(); }
+async function POST(body){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(body)}); return r.json(); }
+
+/* ===== Apertura scheda e Anteprima ===== */
+$('btnOpen').onclick = ()=>{
+  const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
+  window.open(u, '_we_capture_'+Date.now(), 'noopener,width=1280,height=900');
+  log('Scheda aperta. Ora premi “Anteprima” e seleziona quella scheda nel popup.');
+};
+
+$('btnPreview').onclick = async ()=>{
   try{
-    stream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
+    // hint (non obbligatorio ma aiuta su Chromium)
+    const constraints = {video:{preferCurrentTab:true, displaySurface:'browser'}, audio:false};
+    stream = await navigator.mediaDevices.getDisplayMedia(constraints);
     video.srcObject = stream; await video.play();
     log('Condivisione attiva (scheda/finestra/schermo).');
-    setState('Anteprima attiva');
-    // abilita comandi base
-    ['capFrame','capFull','capReset','btnStart'].forEach(id=>document.getElementById(id).disabled=false);
-    mark(btnPreview,true);
-    if(SID){ await GET('mode=note&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)+'&msg='+encodeURIComponent('USER_PREVIEW_STARTED')+'&ua='+encodeURIComponent(navigator.userAgent||'')); }
+    note('PREVIEW_START',{surface: (stream.getVideoTracks()[0].getSettings()?.displaySurface||'')});
+    stream.getVideoTracks()[0].addEventListener('ended', ()=>{ log('Condivisione terminata'); note('PREVIEW_END'); updateUI(); });
   }catch(e){ alert('Condivisione negata: '+(e.message||e)); }
+  updateUI();
 };
-btnOpen.onclick = ()=>{ const u=(addr.value||'').trim(); if(u) window.open(u,'_blank','noopener'); };
 
-/* ---------- Fence ---------- */
+/* ===== Fence ===== */
 (function fence(){
   let drag=false,sx=0,sy=0;
   function bounds(e){ const r=wrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
@@ -144,118 +162,134 @@ btnOpen.onclick = ()=>{ const u=(addr.value||'').trim(); if(u) window.open(u,'_b
   });
   window.addEventListener('pointerup', ()=>{ drag=false; const w=parseFloat(rect.style.width)||0,h=parseFloat(rect.style.height)||0; if(w<3&&h<3){rect.style.width='160px';rect.style.height='100px';} });
 })();
-capReset.onclick = ()=>{ rect.style.display='none'; log('Selezione rimossa'); };
+$('capReset').onclick = ()=>{ rect.style.display='none'; log('Selezione rimossa'); note('CROP_RESET'); };
 
-/* ---------- Scatti da video ---------- */
-capFrame.onclick = ()=>{
-  if(!stream || !video.videoWidth){ alert('Anteprima non attiva'); return; }
-  const c=document.createElement('canvas'); c.width=video.videoWidth; c.height=video.videoHeight; c.getContext('2d').drawImage(video,0,0);
-  img.src=c.toDataURL('image/png'); img.classList.add('hasSrc');
-  last={type:'image',dataUrl:img.src,meta:{provider:'screen-capture',label:'FRAME_CROP',dimension:`${video.videoWidth}x${video.videoHeight}`}};
-  savePng.disabled=false; savePngEmail.disabled=false;
+/* ===== Scatti dal video ===== */
+function snapToImg(){
+  const vw=video.videoWidth, vh=video.videoHeight;
+  const c=document.createElement('canvas'); c.width=vw; c.height=vh; c.getContext('2d').drawImage(video,0,0);
+  img.src=c.toDataURL('image/png'); img.classList.add('hasSrc'); updateUI();
+}
+$('capFrame').onclick = ()=>{
+  if(!SID){ alert('Avvia certificazione'); return; }
+  if(!hasStream()){ alert('Attiva Anteprima'); return; }
+  snapToImg(); note('FRAME_CAPTURE',{mode:'crop',vw:video.videoWidth,vh:video.videoHeight}); log('Frame acquisito (selezione attiva se presente).');
 };
-capFull.onclick = ()=>{ capFrame.click(); rect.style.display='none'; last.meta.label='FRAME_FULL'; };
+$('capFull').onclick = ()=>{
+  if(!SID){ alert('Avvia certificazione'); return; }
+  if(!hasStream()){ alert('Attiva Anteprima'); return; }
+  rect.style.display='none'; snapToImg(); note('FRAME_CAPTURE',{mode:'full',vw:video.videoWidth,vh:video.videoHeight}); log('Frame intero acquisito.');
+};
 
-/* ---------- Start / Finish ---------- */
-btnStart.onclick = async ()=>{
+/* ===== Start / Finish ===== */
+$('btnStart').onclick = async ()=>{
   const cli=client.value.trim(), u=(addr.value||'').trim();
   if(!cli){ alert('Cliente obbligatorio'); return; }
   if(!u){ alert('URL obbligatoria'); return; }
-  currentUrl=u; setState('Creo sessione…'); mark(btnStart,true); btnStart.disabled=true;
-  const host=hostFrom(u);
-  const js=await GET('mode=start&t='+encodeURIComponent(TOKEN)
-    +'&u='+encodeURIComponent(u)
-    +'&host='+encodeURIComponent(host)
+  currentUrl=u;
+  $('btnStart').dataset.on='1'; $('btnStart').disabled=true; setState('Creo sessione…');
+  const js=await GET('mode=start&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)
     +'&client='+encodeURIComponent(cli)
     +'&ua='+encodeURIComponent(navigator.userAgent||'')
     +'&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')
     +'&lang='+encodeURIComponent(navigator.language||'')
     +'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)
     +'&page='+encodeURIComponent(location.href||''));
-  if(!js.ok){ alert(js.error); mark(btnStart,false); btnStart.disabled=false; setState('Errore'); return; }
+  if(!js.ok){ alert(js.error); $('btnStart').dataset.on='0'; $('btnStart').disabled=false; setState('Errore'); return; }
   SID=js.sessionId;
-  ['btnFinish','btnSMfull','btnSMview','btnPSI','btnSnap'].forEach(id=>document.getElementById(id).disabled=false);
-  log('Sessione avviata: '+js.base+' (snapshot iniziale salvato)');
-  setState('Sessione attiva');
+  log('Sessione avviata: '+js.base+' (snapshot iniziale salvato)'); note('SESSION_START',{base:js.base,url:u});
+  updateUI();
+};
+$('btnFinish').onclick = async ()=>{
+  if(!SID){ alert('Nessuna sessione'); return; }
+  $('btnFinish').dataset.on='1'; $('btnFinish').disabled=true; setState('Creo ZIP…');
+  const js=await GET('mode=finish&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)
+      +(rcpts.value?('&to='+encodeURIComponent(rcpts.value)):'')
+      +(subj.value?('&subj='+encodeURIComponent(subj.value)):''));
+  if(!js.ok){ alert(js.error); $('btnFinish').dataset.on='0'; $('btnFinish').disabled=false; setState('Errore'); return; }
+  log('ZIP: '+js.zipUrl); note('SESSION_FINISH',{zip:js.zipUrl}); setState('Completato');
+  // blocco azioni post-finish
+  document.querySelectorAll('button').forEach(b=> b.disabled=true);
 };
 
-btnFinish.onclick = async ()=>{
-  if(!SID){ alert('Nessuna sessione attiva'); return; }
-  setState('Creo ZIP…'); mark(btnFinish,true); btnFinish.disabled=true;
-  const qs='mode=finish&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)
-          +(rcpts.value?('&to='+encodeURIComponent(rcpts.value)):'')
-          +(subj.value?('&subj='+encodeURIComponent(subj.value)):'');
-  const js=await GET(qs);
-  if(!js.ok){ alert(js.error); mark(btnFinish,false); btnFinish.disabled=false; setState('Errore'); return; }
-  log('ZIP: '+js.zipUrl); setState('Completato');
-  document.querySelectorAll('button').forEach(b=> b.disabled=false);
-  // dopo finish: blocca azioni che alterano lo stato
-  ['capFrame','capFull','savePng','savePngEmail','saveVideo','btnSMfull','btnSMview','btnPSI','btnSnap'].forEach(id=>document.getElementById(id).disabled=true);
-};
-
-/* ---------- SM / PSI / Snapshot ---------- */
-async function runSMPSI(kind){
-  const u=(addr.value||currentUrl||'').trim(); if(!u){ alert('URL mancante'); return; }
+/* ===== SM / PSI / Snapshot ===== */
+async function runSM(kind){
   if(!SID){ alert('Avvia certificazione'); return; }
-  setState(kind+'…'); const dim=(kind==='SM_FULL'?smDim.value:smDim.value.replace('full','1080'));
-  const q = kind==='PSI'
+  const u=(addr.value||currentUrl||'').trim(); setState(kind+'…');
+  const dim=$('smDim').value;
+  const q = (kind==='PSI')
     ? 'mode=psi&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)
     : 'mode=sm&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)+'&dim='+encodeURIComponent(kind==='SM_FULL'?dim:dim);
   const js=await GET(q);
   if(!js.ok){ alert(js.error); setState('Errore'); return; }
-  // salvataggio diretto (senza fence)
-  const meta=js.meta||{provider:(kind==='PSI'?'psi':'screenshotmachine'),label:(kind==='PSI'?'PSI':'SM'),dimension:dim};
-  const save=await POST({authToken:TOKEN,sid:SID,fileNameHint:'shot.png',dataUrl:js.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,canonical:'',sourceMeta:meta,crop:null}});
-  if(!save.ok){ alert(save.error); setState('Errore'); return; }
-  log(kind+' salvato: '+save.name+' sha='+save.sha256); setState('Pronto');
+  const meta=js.meta||{provider:(kind==='PSI'?'psi':'screenshotmachine'),label:kind,dimension:dim};
+  const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:js.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:meta,crop:null}});
+  if(!sv.ok){ alert(sv.error); setState('Errore'); return; }
+  log(kind+' salvato: '+sv.name+' sha='+sv.sha256); note(kind+'_SAVED',{name:sv.name,sha:sv.sha256}); setState('Pronto');
 }
-btnSMfull.onclick = ()=> runSMPSI('SM_FULL');
-btnSMview.onclick = ()=> runSMPSI('SM_VIEW');
-btnPSI.onclick    = ()=> runSMPSI('PSI');
-btnSnap.onclick   = async ()=>{
+$('btnSMfull').onclick = ()=> runSM('SM_FULL');
+$('btnSMview').onclick = ()=> runSM('SM_VIEW');
+$('btnPSI').onclick    = ()=> runSM('PSI');
+$('btnSnap').onclick   = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||currentUrl||'').trim(); setState('Snapshot…');
   const js=await GET('mode=snapshot&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)+'&u='+encodeURIComponent(u));
   if(!js.ok){ alert(js.error); setState('Errore'); return; }
-  log('Snapshot salvato (asset='+js.assets+')'); setState('Pronto');
+  log('Snapshot salvato (asset='+js.assets+')'); note('SNAPSHOT_SAVED',{assets:js.assets}); setState('Pronto');
 };
 
-/* ---------- Registrazione video ---------- */
-recStart.onclick = ()=>{
-  if(!stream){ alert('Attiva Anteprima prima'); return; }
-  chunks=[]; mediaRec=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp9'});
-  mediaRec.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
-  mediaRec.onstop=()=>{
+/* ===== Registrazione video ===== */
+$('recStart').onclick = ()=>{
+  if(!SID){ alert('Avvia certificazione'); return; }
+  if(!hasStream()){ alert('Attiva Anteprima'); return; }
+  chunks=[]; rec=new MediaRecorder(stream,{mimeType:'video/webm;codecs=vp9'});
+  rec.ondataavailable=e=>{ if(e.data && e.data.size) chunks.push(e.data); };
+  rec.onstop=()=>{
     const blob=new Blob(chunks,{type:'video/webm'});
-    const fr=new FileReader(); fr.onload=()=>{ last={type:'video',dataUrl:String(fr.result),meta:{provider:'screen-record',label:'RECORDING'},crop:null}; saveVideo.disabled=true; saveVideo.disabled=false; log('Video pronto da salvare'); }; fr.readAsDataURL(blob);
+    const fr=new FileReader(); fr.onload=()=>{ window.lastVideoB64=String(fr.result); updateUI(); log('Video pronto da salvare'); note('REC_READY'); };
+    fr.readAsDataURL(blob);
   };
-  mediaRec.start(); recStart.disabled=true; recStop.disabled=false; document.getElementById('recState').textContent='REC';
+  rec.start(); $('recStart').disabled=true; $('recStop').disabled=false; log('REC…'); note('REC_START');
 };
-recStop.onclick = ()=>{ if(mediaRec && mediaRec.state!=='inactive') mediaRec.stop(); recStart.disabled=false; recStop.disabled=true; document.getElementById('recState').textContent='idle'; };
-
-/* ---------- Salvataggi manuali ---------- */
-async function savePNG(email){
+$('recStop').onclick = ()=>{ if(rec && rec.state!=='inactive') rec.stop(); $('recStart').disabled=false; $('recStop').disabled=true; log('REC stop'); note('REC_STOP'); };
+$('saveVideo').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
-  const payload=dataUrlFromImage(rect.style.display==='none'); if(!payload){ alert('Nessuna immagine'); return; }
+  if(!window.lastVideoB64){ alert('Nessun video pronto'); return; }
   const u=(addr.value||currentUrl||'').trim();
-  const js=await POST({authToken:TOKEN,sid:SID,fileNameHint:'shot.png',dataUrl:payload.dataUrl,sendEmail:email,recipients:rcpts.value||undefined,subject:subj.value||undefined,meta:{url:u,finalUrl:u,canonical:'',sourceMeta:{provider:'screen-capture',label:(payload.crop?'FRAME_CROP':'FRAME_FULL')},crop:payload.crop}});
-  if(!js.ok){ alert(js.error); return; }
-  log('PNG salvato: '+js.name+' sha='+js.sha256);
+  const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:window.lastVideoB64,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-record',label:'RECORDING'}}});
+  if(!sv.ok){ alert(sv.error); return; }
+  delete window.lastVideoB64; updateUI(); log('VIDEO salvato: '+sv.name+' sha='+sv.sha256); note('VIDEO_SAVED',{name:sv.name,sha:sv.sha256});
+};
+
+/* ===== Salvataggi PNG dall’IMG (crop o intero) ===== */
+function makePayload(full=false){
+  if(!img.classList.contains('hasSrc')) return null;
+  const natW=img.naturalWidth, natH=img.naturalHeight;
+  const c=document.createElement('canvas'), ctx=c.getContext('2d');
+  if(full || rect.style.display==='none' || !parseFloat(rect.style.width)||!parseFloat(rect.style.height)){
+    c.width=natW; c.height=natH; ctx.drawImage(img,0,0); return {dataUrl:c.toDataURL('image/png'), crop:null};
+  }
+  const dispW=img.clientWidth, dispH=img.clientHeight;
+  const rx=Math.round(parseFloat(rect.style.left)*natW/dispW);
+  const ry=Math.round(parseFloat(rect.style.top )*natH/dispH);
+  const rw=Math.round(parseFloat(rect.style.width)*natW/dispW);
+  const rh=Math.round(parseFloat(rect.style.height)*natH/dispH);
+  c.width=Math.max(1,rw); c.height=Math.max(1,rh); ctx.drawImage(img,rx,ry,rw,rh,0,0,c.width,c.height);
+  return {dataUrl:c.toDataURL('image/png'), crop:{x:rx,y:ry,w:c.width,h:c.height,naturalW:natW,naturalH:natH}};
 }
-savePng.onclick = ()=> savePNG(false);
-savePngEmail.onclick = ()=> savePNG(true);
-
-saveVideo.onclick = async ()=>{
+async function savePNG(sendMail){
   if(!SID){ alert('Avvia certificazione'); return; }
-  if(last.type!=='video'){ alert('Nessun video pronto'); return; }
+  const payload=makePayload(false); if(!payload){ alert('Nessuna immagine'); return; }
   const u=(addr.value||currentUrl||'').trim();
-  const js=await POST({authToken:TOKEN,sid:SID,fileNameHint:'rec.webm',dataUrl:last.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-record',label:'RECORDING'}}});
-  if(!js.ok){ alert(js.error); return; }
-  log('VIDEO salvato: '+js.name+' sha='+js.sha256); saveVideo.disabled=true;
-};
+  const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:sendMail,recipients:rcpts.value||undefined,subject:subj.value||undefined,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-capture',label:(payload.crop?'FRAME_CROP':'FRAME_FULL')},crop:payload.crop}});
+  if(!sv.ok){ alert(sv.error); return; }
+  log((sendMail?'PNG inviato e ':'PNG ')+'salvato: '+sv.name+' sha='+sv.sha256); note('PNG_SAVED',{name:sv.name,sha:sv.sha256});
+}
+$('savePng').onclick = ()=> savePNG(false);
+$('savePngEmail').onclick = ()=> savePNG(true);
 
-/* ---------- Avvio UI ---------- */
-window.addEventListener('load', ()=>{ setState('Pronto'); });
+/* ===== Avvio ===== */
+updateUI();
 </script>
 </body>
 </html>
