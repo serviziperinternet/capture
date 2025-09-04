@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v15.1</title>
+<title>Web Evidence – v15.2</title>
 <style>
   :root{--bd:#ddd;--ok:#18a957;--danger:#e11d48}
   *{box-sizing:border-box}
@@ -19,17 +19,14 @@
   .danger{background:var(--danger)!important;border-color:var(--danger)!important;color:#fff}
   button[disabled]{opacity:.55;cursor:not-allowed}
 
-  /* layout: sinistra anteprima, destra tutto il resto */
   .wrap{display:grid;grid-template-columns:320px 1fr;gap:12px;padding:12px}
   .card{border:1px solid #eee;border-radius:12px;background:#fff}
   .card h3{margin:0;padding:10px 12px;border-bottom:1px solid #f3f4f4;font-size:13px;font-weight:700}
 
-  /* ANTEPRIMA */
   .side{padding:12px}
   #thumb{width:300px;height:300px;display:block;background:#000;border:1px dashed #ccc;border-radius:10px}
   .mut{color:#666}
 
-  /* DESTRA: controlli + log (fisso) + cattura grande */
   .controls{display:flex;flex-direction:column;gap:10px;padding:12px}
   .controls .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .dim{opacity:.6}
@@ -47,7 +44,6 @@
 <body>
 
 <header>
-  <!-- Riga 1: client, url, Start/Termina a destra -->
   <div class="hrow row1">
     <input id="client" placeholder="Cliente…" />
     <input id="addr" type="url" placeholder="https://…" />
@@ -56,7 +52,6 @@
       <button id="btnFinish" class="danger" type="button" style="display:none">Termina certificazione</button>
     </div>
   </div>
-  <!-- Riga 2: Apri / Condividi (appaiono dopo start), select PEC + email sotto -->
   <div class="hrow row2" style="margin-top:8px">
     <button id="btnOpen" type="button" disabled class="dim" style="display:none">Apri sito in finestra</button>
     <button id="btnShare" type="button" disabled class="dim" style="display:none">Condividi</button>
@@ -70,36 +65,30 @@
 </header>
 
 <div class="wrap">
-  <!-- COLONNA SINISTRA: ANTEPRIMA -->
   <div class="card side" style="grid-column:1">
     <h3>Anteprima LIVE (300×300)</h3>
     <canvas id="thumb" width="300" height="300" aria-label="Anteprima"></canvas>
     <div class="mut" style="margin-top:8px">1) Inizia → 2) Apri → 3) Condividi</div>
   </div>
 
-  <!-- COLONNA DESTRA: CONTROLLI + LOG -->
   <div class="card" style="grid-column:2">
     <h3>Controlli</h3>
     <div class="controls" id="controlsBox">
-      <!-- riga comandi alti -->
       <div class="row">
         <button id="btnFull" type="button" disabled class="dim">Cattura full page</button>
         <button id="btnAssets" type="button" disabled class="dim">Scarica asset</button>
       </div>
-      <!-- riga scatto -->
       <div class="row">
         <button id="btnSnap" type="button" disabled class="dim">Scatta</button>
         <button id="btnSave" type="button" disabled class="dim">Salva</button>
       </div>
     </div>
-    <!-- LOG SOTTO I PULSANTI -->
     <div id="logWrap">
       <h3 style="border:none;padding:6px 0 6px 0;margin:0">Log</h3>
       <div id="logBox"></div>
     </div>
   </div>
 
-  <!-- SOTTO: finestra di cattura grande -->
   <div class="card capCard">
     <h3>Finestra di cattura (scatto)</h3>
     <div class="cap-wrap" id="capWrap">
@@ -110,36 +99,92 @@
 </div>
 
 <script>
-/* ===== Query + Config ===== */
+/* ===== util ===== */
+const $=id=>document.getElementById(id);
+function logLine(s, important=false){
+  const L=$('logBox');
+  const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':'');
+  L.textContent = entry + '\n' + L.textContent; L.scrollTop=0;
+}
+function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
+function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
+
+/* ===== query/config ===== */
 const qs=new URLSearchParams(location.search);
 let APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
 if(qs.get('u')) addr.value=qs.get('u');
 if(qs.get('client')) client.value=qs.get('client');
 if(qs.get('dom')) client.dataset.domain=qs.get('dom');
 if(qs.get('domain')) client.dataset.domain=qs.get('domain');
-if(qs.get('to')) rcpts.value=qs.get('to');
+if(qs.get('to')) $('rcpts').value=qs.get('to');
 
-/* ===== Stato ===== */
-let SID=''; let stream=null; let rafId=null; let hasShot=false; let lockedShare=false; let canonicalUrl='';
-
-const $ = id => document.getElementById(id);
-const video = document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
+/* ===== stato ===== */
+let SID=''; let stream=null; let rafId=null; let lockedShare=false; let hasShot=false;
+const video=document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
 const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWrap');
 
-/* ===== Helpers ===== */
-function logLine(s, important=false){
-  const L=$('logBox');
-  const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':'');
-  L.textContent = entry + '\n' + L.textContent; // prepend
-  L.scrollTop = 0;
-}
-async function note(type, data={}){ if(!SID) return; const q='mode=note&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+'&msg='+encodeURIComponent(type+' '+JSON.stringify(data)); try{ await fetch(APP+(APP.includes('?')?'&':'?')+q); }catch(_){}}; 
-function parseHost(u){ try{ return new URL(u).hostname.replace(/^www\\./,''); }catch(e){ const a=document.createElement('a'); a.href=u; return (a.hostname||'').replace(/^www\\./,''); } }
+/* ===== server ===== */
 async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); return r.json(); }
-async function POST(body){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(body)}); return r.json(); }
-function enable(el, on){ el.disabled=!on; el.classList.toggle('dim', !on); }
+async function POST(b){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(b)}); return r.json(); }
 
-/* ===== Anteprima (300x300) ===== */
+/* ===== busy guard + stati UI ===== */
+let BUSY=false, PREV_STATE=null;
+function snapshotUIState(){
+  return {
+    full:!$('btnFull').disabled, assets:!$('btnAssets').disabled, snap:!$('btnSnap').disabled, save:!$('btnSave').disabled,
+    open:!$('btnOpen').disabled && $('btnOpen').style.display!=='none',
+    share:!$('btnShare').disabled && $('btnShare').style.display!=='none',
+    finish:!$('btnFinish').disabled && $('btnFinish').style.display!=='none'
+  };
+}
+function setUIState(state){
+  // state: idle | started | shared | locked | finished
+  if(state==='idle'){
+    enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false);
+    $('btnOpen').style.display='none'; $('btnShare').style.display='none';
+  }
+  if(state==='started'){
+    $('btnOpen').style.display='inline-block'; enable($('btnOpen'), true);
+    $('btnShare').style.display='inline-block'; enable($('btnShare'), false);
+    enable($('btnFull'), true); enable($('btnAssets'), true);
+    enable($('btnSnap'), false); enable($('btnSave'), false);
+  }
+  if(state==='shared'){
+    enable($('btnFull'), true); enable($('btnAssets'), true);
+    enable($('btnSnap'), true); enable($('btnSave'), hasShot);
+  }
+  if(state==='locked'){
+    enable($('btnSnap'), false); enable($('btnSave'), false);
+    enable($('btnFull'), true); enable($('btnAssets'), true);
+  }
+  if(state==='finished'){
+    document.querySelectorAll('button').forEach(b=> b.disabled=true);
+  }
+}
+async function withBusy(label, fn){
+  if(BUSY){ logLine('ATTESA PER: '+BUSY); return; }
+  BUSY=label; PREV_STATE=snapshotUIState();
+  // disabilita tutto
+  document.querySelectorAll('button').forEach(b=> b.disabled=true);
+  logLine('ATTESA PER: '+label, true);
+  try{ const res=await fn(); logLine('PRONTO: '+label, true); return res; }
+  catch(e){ logLine('ERRORE in '+label+': '+(e.message||e), true); }
+  finally{
+    BUSY=false;
+    // ripristina
+    if($('btnFinish').style.display==='inline-block') $('btnFinish').disabled=false;
+    if(PREV_STATE){
+      enable($('btnFull'), !!PREV_STATE.full);
+      enable($('btnAssets'), !!PREV_STATE.assets);
+      enable($('btnSnap'), !!PREV_STATE.snap);
+      enable($('btnSave'), !!PREV_STATE.save);
+      if($('btnOpen').style.display!=='none') $('btnOpen').disabled=!PREV_STATE.open;
+      if($('btnShare').style.display!=='none') $('btnShare').disabled=!PREV_STATE.share;
+    }
+  }
+}
+
+/* ===== anteprima ===== */
 function drawPreview(){
   const ctx=thumb.getContext('2d'); const tw=thumb.width, th=thumb.height;
   ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th);
@@ -149,106 +194,89 @@ function drawPreview(){
   ctx.drawImage(video, dx, dy, dw, dh);
   rafId=requestAnimationFrame(drawPreview);
 }
+(function(){ if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview); })();
 
-/* ===== Start ===== */
+/* ===== START ===== */
 $('btnStart').onclick = async ()=>{
-  const cli=client.value.trim(), u=(addr.value||'').trim();
+  if(SID){ logLine('Sessione già attiva.'); return; }
+  const cli=client.value.trim(), url=(addr.value||'').trim();
   if(!cli){ alert('Cliente obbligatorio'); return; }
-  if(!u){ alert('URL obbligatoria'); return; }
-  canonicalUrl = u.trim();
-  const host = client.dataset.domain || parseHost(u);
+  if(!url){ alert('URL obbligatoria'); return; }
 
-  // start server
-  const js=await GET(
-    'mode=start'
-    +'&t='+encodeURIComponent(TOKEN||'')
-    +'&u='+encodeURIComponent(u)
-    +'&client='+encodeURIComponent(cli)
-    +(host?('&domain='+encodeURIComponent(host)):'')
-    +'&ua='+encodeURIComponent(navigator.userAgent||'')
-    +'&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')
-    +'&lang='+encodeURIComponent(navigator.language||'')
-    +'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)
-    +'&page='+encodeURIComponent(location.href||'')
-  );
-  if(!js.ok){ alert(js.error||'Errore avvio'); return; }
-  SID=js.sessionId;
+  // blocca SUBITO (anti-manomissione)
+  $('btnStart').style.opacity=.5; $('btnStart').disabled=true;
+  addr.readOnly=true; addr.disabled=true; client.readOnly=true; client.disabled=true;
+  logLine('Avvio certificazione…');
 
-  // Subject auto: "Web Evidence – Cliente – Dominio – yyyy-MM-dd HH:mm"
-  const now=new Date();
-  const pad=n=>('0'+n).slice(-2);
-  const when = now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate())+' '+pad(now.getHours())+':'+pad(now.getMinutes());
-  window._SUBJ_DEFAULT = 'Web Evidence – '+cli+' – '+(host||'unknown')+' – '+when;
+  await withBusy('Avvio certificazione', async ()=>{
+    const host = (client.dataset.domain||'') || (new URL(url)).hostname.replace(/^www\./,'');
+    const js=await GET('mode=start&t='+encodeURIComponent(TOKEN||'')
+      +'&u='+encodeURIComponent(url)+'&client='+encodeURIComponent(cli)
+      +'&domain='+encodeURIComponent(host)
+      +'&ua='+encodeURIComponent(navigator.userAgent||'')
+      +'&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')
+      +'&lang='+encodeURIComponent(navigator.language||'')
+      +'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)
+      +'&page='+encodeURIComponent(location.href||'')
+    );
+    if(!js.ok) throw new Error(js.error||'Errore avvio');
+    SID=js.sessionId;
 
-  logLine('SESSIONE: '+js.base+(js.folderUrl?(' → '+js.folderUrl):''), true);
-  if(js.trace && js.trace.length){ js.trace.forEach(line => logLine(line)); }
+    // subject auto
+    const now=new Date(), pad=n=>('0'+n).slice(-2);
+    window._SUBJ_DEFAULT='Web Evidence – '+cli+' – '+host+' – '+now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate())+' '+pad(now.getHours())+':'+pad(now.getMinutes());
 
-  // blocca client/url
-  addr.readOnly=true; client.readOnly=true;
+    logLine('SESSIONE: '+js.base+(js.folderUrl?(' → '+js.folderUrl):''), true);
+    if(js.trace) js.trace.forEach(t=>logLine(t));
 
-  // mostra Apri/Condividi e abilita
-  $('btnOpen').style.display='inline-block'; $('btnOpen').disabled=false; $('btnOpen').classList.remove('dim');
-  $('btnShare').style.display='inline-block'; $('btnShare').disabled=true;  $('btnShare').classList.add('dim');
-
-  // ABILITA SUBITO Full e Asset (non legati alla condivisione)
-  enable($('btnFull'), true);
-  enable($('btnAssets'), true);
-
-  // swap start→finish
-  $('btnStart').style.display='none';
-  $('btnFinish').style.display='inline-block';
+    // swap start→finish e abilita comandi
+    $('btnStart').style.display='none';
+    $('btnFinish').style.display='inline-block'; $('btnFinish').disabled=false;
+    setUIState('started');
+  });
 };
 
-/* ===== Apri → dopo click sparisce; Condividi si abilita ===== */
+/* ===== Apri / Condividi ===== */
 $('btnOpen').onclick = ()=>{
   const url=(addr.value||'').trim(); if(!url){ alert('URL obbligatoria'); return; }
   window.open(url, '_we_clean_'+Date.now(), 'noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no');
   logLine('Finestra/pagina aperta.');
   $('btnOpen').style.display='none';
-  $('btnShare').disabled=false; $('btnShare').classList.remove('dim');
+  enable($('btnShare'), true);
 };
-
-/* ===== Condividi: acquisizione stream compatibile ===== */
 $('btnShare').onclick = async ()=>{
-  try{
-    // Semplificata per compatibilità: niente displaySurface avanzati
-    stream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
-    video.srcObject = stream;
+  await withBusy('Condivisione schermo', async ()=>{
+    const s = await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
+    stream = s; video.srcObject = s;
     await new Promise(r=>video.addEventListener('loadedmetadata', r, {once:true}));
     video.play();
     if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview);
-    logLine('Condivisione attiva (preview a sinistra).', true);
+    logLine('Condivisione attiva (anteprima a sinistra).', true);
 
-    const vt = stream.getVideoTracks()[0];
+    const vt = s.getVideoTracks()[0];
     vt.addEventListener('ended', ()=>{
       logLine('Condivisione terminata. Scatto disattivato per questa sessione.', true);
-      lockedShare = true; enable($('btnSnap'), false); enable($('btnSave'), false);
+      lockedShare=true; setUIState('locked');
     });
 
-    // abilita scatto (solo se condivisione viva)
     enable($('btnSnap'), true);
-
-    // disabilita per sempre Share
     $('btnShare').disabled=true; $('btnShare').classList.add('dim');
-  }catch(e){ alert('Condivisione negata: '+(e.message||e)); }
+    setUIState('shared');
+  });
 };
 
-/* ===== Verifica URL server prima di scatto/salvataggio ===== */
+/* ===== verifica URL ===== */
 async function verifyUrlOrStop(){
-  const chk = await GET('mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(addr.value||''));
-  if(!chk.ok){ logLine('Verifica URL fallita: '+(chk.error||'mismatch')+' — operazione bloccata.', true); return false; }
-  if(chk.mismatch){ logLine('URL modificata rispetto alla sessione iniziale. Blocco.', true); return false; }
+  const chk=await GET('mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(addr.value||''));
+  if(!chk.ok || chk.mismatch){ logLine('URL variata / verifica fallita. Operazione bloccata.', true); return false; }
   return true;
 }
 
-/* ===== Cattura full page (SM + PSI) ===== */
+/* ===== Full page ===== */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
-  enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false);
-  $('btnFull').classList.add('success');
-
-  try{
+  await withBusy('Cattura full page', async ()=>{
     logLine('SM 1920×1240 in corso…');
     let sm1=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240');
     if(!sm1.ok) throw new Error(sm1.error||'SM 1240');
@@ -269,25 +297,21 @@ $('btnFull').onclick = async ()=>{
     }else{
       logLine('PSI non disponibile.');
     }
-  }catch(e){ logLine('Errore full page: '+(e.message||e), true); }
-  $('btnFull').classList.remove('success'); enable($('btnAssets'), true); if(!lockedShare){ enable($('btnSnap'), true); }
+  });
 };
 
 /* ===== Asset ===== */
 $('btnAssets').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
-  $('btnAssets').classList.add('success'); enable($('btnFull'), false); enable($('btnSnap'), false); enable($('btnSave'), false);
-  logLine('Scarico asset… attendere');
-  try{
+  await withBusy('Scarica asset', async ()=>{
     const sj=await GET('mode=snapshot&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+'&u='+encodeURIComponent(u));
     if(!sj.ok) throw new Error(sj.error||'Snapshot error');
     logLine('HTML+asset salvati: '+sj.count, true);
-  }catch(e){ logLine('Errore asset: '+(e.message||e), true); }
-  $('btnAssets').classList.remove('success'); enable($('btnFull'), true); if(!lockedShare){ enable($('btnSnap'), true); }
+  });
 };
 
-/* ===== Fence + Scatto + Salva ===== */
+/* ===== Fence + Scatta + Salva ===== */
 (function fence(){
   let drag=false,sx=0,sy=0;
   function bounds(e){ const r=capWrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
@@ -307,23 +331,20 @@ $('btnAssets').onclick = async ()=>{
 })();
 
 $('btnSnap').onclick = async ()=>{
-  if(lockedShare){ logLine('Condivisione chiusa: scatto non consentito in questa sessione.', true); return; }
+  if(lockedShare){ logLine('Condivisione chiusa: scatto non consentito.', true); return; }
   if(!(await verifyUrlOrStop())) return;
 
-  const trackOk = (stream && stream.getVideoTracks().length && stream.getVideoTracks()[0].readyState==='live');
-  if(!trackOk){ logLine('Condivisione non attiva: impossibile scattare.', true); enable($('btnSnap'), false); return; }
-
-  $('btnSnap').classList.add('success'); enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSave'), false);
-  try{
-    // CATTURA dal video invece di ImageCapture (più compatibile)
+  await withBusy('Scatto', async ()=>{
+    if(!(stream && stream.getVideoTracks().length && stream.getVideoTracks()[0].readyState==='live')){
+      logLine('Condivisione non attiva: premi “Condividi”.', true);
+      return;
+    }
     const w = video.videoWidth||1920, h = video.videoHeight||1080;
     const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d').drawImage(video,0,0,w,h);
     imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
     hasShot=true; enable($('btnSave'), true);
     logLine('Scatto eseguito → immagine grande pronta.', true);
-    note('SNAP_OK',{w,h});
-  }catch(e){ logLine('Errore scatto: '+(e.message||e), true); }
-  $('btnSnap').classList.remove('success'); enable($('btnFull'), true); enable($('btnAssets'), true);
+  });
 };
 
 function makePayload(){
@@ -350,33 +371,32 @@ $('btnSave').onclick = async ()=>{
   if(!hasShot){ alert('Fai prima uno scatto'); return; }
   if(!(await verifyUrlOrStop())) return;
 
-  $('btnSave').classList.add('success'); enable($('btnFull'), false); enable($('btnAssets'), false);
-  const payload = await makePayload(); if(!payload){ alert('Nessuna immagine'); $('btnSave').classList.remove('success'); return; }
-  const u=(addr.value||'').trim();
-  const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-capture',label:(payload.crop?'FRAME_CROP':'FRAME_FULL')},crop:payload.crop}});
-  if(!sv.ok){ alert(sv.error||'Errore salvataggio'); $('btnSave').classList.remove('success'); return; }
-  logLine('PNG salvato: '+sv.name+' sha='+sv.sha256, true);
-  $('btnSave').classList.remove('success'); enable($('btnFull'), true); enable($('btnAssets'), true);
+  await withBusy('Salvataggio scatto', async ()=>{
+    const payload = await makePayload(); if(!payload){ logLine('Nessuna immagine.'); return; }
+    const u=(addr.value||'').trim();
+    const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-capture',label:(payload.crop?'FRAME_CROP':'FRAME_FULL')},crop:payload.crop}});
+    if(!sv.ok) throw new Error(sv.error||'Errore salvataggio');
+    logLine('PNG salvato: '+sv.name+' sha='+sv.sha256, true);
+  });
 };
 
 /* ===== Termina ===== */
 $('btnFinish').onclick = async ()=>{
   if(!SID){ alert('Nessuna sessione'); return; }
-  // (al termine disabilito tutto: è la “chiusura” legale del pacchetto)
-  const q='mode=finish'
-    +'&t='+encodeURIComponent(TOKEN||'')
-    +'&id='+encodeURIComponent(SID)
-    +(rcpts.value?('&to='+encodeURIComponent(rcpts.value)):'')
-    + '&subj='+encodeURIComponent(window._SUBJ_DEFAULT||'Web Evidence')
-    +'&pecMode='+encodeURIComponent(document.getElementById('pecMode').value);
-  const js=await GET(q);
-  if(!js.ok){ alert(js.error||'Errore finish'); return; }
-  logLine('ZIP: '+js.zipUrl, true);
-  document.querySelectorAll('button').forEach(b=> b.disabled=true);
+  await withBusy('Termina certificazione (ZIP + invio)', async ()=>{
+    const q='mode=finish'
+      +'&t='+encodeURIComponent(TOKEN||'')
+      +'&id='+encodeURIComponent(SID)
+      +($('rcpts').value?('&to='+encodeURIComponent($('rcpts').value)):'')
+      + '&subj='+encodeURIComponent(window._SUBJ_DEFAULT||'Web Evidence')
+      +'&pecMode='+encodeURIComponent(document.getElementById('pecMode').value);
+    const js=await GET(q);
+    if(!js.ok) throw new Error(js.error||'Errore finish');
+    logLine('ZIP creato nella cartella sessione: '+js.zipName, true);
+    if(js.zipUrl) logLine('Link ZIP: '+js.zipUrl);
+    setUIState('finished');
+  });
 };
-
-/* ===== avvia disegno anteprima ===== */
-(function(){ if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview); })();
 </script>
 </body>
 </html>
