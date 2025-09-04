@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v14.8</title>
+<title>Web Evidence – v14.9</title>
 <style>
   :root{--bd:#ddd;--accent:#0b5cff}
   *{box-sizing:border-box}
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0;color:#111;background:#fff}
 
   header{
-    display:grid;grid-template-columns:170px 1fr auto 260px 1fr auto auto;
+    display:grid;grid-template-columns:170px 1fr auto auto 260px 1fr auto;
     gap:8px;align-items:center;border-bottom:1px solid #eee;padding:10px
   }
   input,button,select{padding:8px;border:1px solid var(--bd);border-radius:10px;background:#fafafa}
@@ -24,7 +24,7 @@
   .card h3{margin:0;padding:10px 12px;border-bottom:1px solid #f3f4f4;font-size:13px;font-weight:700}
 
   .side{padding:12px}
-  #thumb{width:300px;height:300px;display:block;background:#1b1b1b;border:1px dashed #ccc;border-radius:10px}
+  #thumb{width:300px;height:300px;display:block;background:#000;border:1px dashed #ccc;border-radius:10px}
 
   .controls{display:flex;flex-direction:column;gap:10px;padding:12px}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
@@ -47,8 +47,13 @@
 <header id="topbar">
   <input id="client" placeholder="Cliente…" />
   <input id="addr" type="url" placeholder="https://…" />
-  <!-- Flusso: 1) Apri → 2) Condividi -->
-  <button id="btnFlow" class="primary" type="button">Apri sito in finestra</button>
+
+  <!-- Start (blu), poi al suo posto comparirà Termina -->
+  <button id="btnStart" class="primary" type="button">Inizia certificazione</button>
+
+  <!-- Apri e Condividi -->
+  <button id="btnOpen" type="button" disabled class="dim">Apri sito in finestra</button>
+  <button id="btnShare" type="button" disabled class="dim">Condividi</button>
 
   <input id="rcpts" placeholder="Destinatari PEC/email" />
   <input id="subj" value="Web Evidence – Pacchetto prove" />
@@ -57,8 +62,8 @@
     <option value="key">PEC via KEY</option>
     <option value="auto">PEC auto</option>
   </select>
-  <button id="btnStart" type="button" disabled>Inizia certificazione</button>
-  <button id="btnFinish" type="button" disabled>Termina</button>
+
+  <button id="btnFinish" type="button" style="display:none">Termina</button>
 
   <span id="state">Pronto</span>
 </header>
@@ -68,7 +73,7 @@
   <div class="card side" style="grid-column:1">
     <h3>Anteprima LIVE (300×300)</h3>
     <canvas id="thumb" width="300" height="300" aria-label="Anteprima"></canvas>
-    <div class="mut" style="margin-top:8px">1) Apri → 2) Condividi → 3) Inizia</div>
+    <div class="mut" style="margin-top:8px">1) Inizia → 2) Apri → 3) Condividi</div>
   </div>
 
   <!-- Colonna centrale: CONTROLLI -->
@@ -84,7 +89,6 @@
       <div class="row">
         <button id="btnSnap" type="button" disabled class="dim">Scatta</button>
         <button id="btnSave" type="button" disabled class="dim">Salva</button>
-        <button id="btnReset" type="button" disabled class="dim">Reset</button>
       </div>
     </div>
   </div>
@@ -121,13 +125,13 @@ if(qs.get('subj')) subj.value=qs.get('subj');
 if(qs.get('pecMode')) document.getElementById('pecMode').value=qs.get('pecMode');
 
 /* ===== Stato ===== */
-let SID=''; let stream=null; let rafId=null; let hasShot=false; let flowStage=0; // 0=apri, 1=condividi, 2=condiviso
+let SID=''; let stream=null; let rafId=null; let hasShot=false;
 
 const $ = id => document.getElementById(id);
 const video = document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
 const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWrap');
 
-/* ===== Altezze dinamiche: cattura + log partono sotto i pulsanti e riempiono ===== */
+/* ===== Altezze dinamiche: cattura + log partono sotto i pulsanti ===== */
 function setHeights(){
   const headerH = $('topbar').getBoundingClientRect().height;
   const controlsH = $('controlsBox').getBoundingClientRect().height;
@@ -142,14 +146,14 @@ const setState = s => $('state').textContent=s;
 function setActive(el, active){ if(active){ el.classList.add('primary'); }else{ el.classList.remove('primary'); } }
 function enable(el, on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const log = s => { const L=$('log'); L.textContent+=(L.textContent?'\\n':'')+'['+(new Date().toLocaleTimeString())+'] '+s; L.scrollTop=L.scrollHeight; setState(s); };
-async function note(type, data={}){ if(!SID) return; const q='mode=note&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)+'&msg='+encodeURIComponent(type+' '+JSON.stringify(data)); try{ await fetch(APP+(APP.includes('?')?'&':'?')+q); }catch(_){}}; 
+async function note(type, data={}){ if(!SID) return; const q='mode=note&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+'&msg='+encodeURIComponent(type+' '+JSON.stringify(data)); try{ await fetch(APP+(APP.includes('?')?'&':'?')+q); }catch(_){}}; 
 function hasStream(){ return !!(video.srcObject && video.getVideoTracks().length && video.videoWidth); }
 function parseHost(u){ try{ return new URL(u).hostname.replace(/^www\\./,''); }catch(e){ const a=document.createElement('a'); a.href=u; return (a.hostname||'').replace(/^www\\./,''); } }
 
-/* ===== Carica CFG dal server per riempire campi ===== */
 async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); return r.json(); }
 async function POST(body){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(body)}); return r.json(); }
 
+/* ===== Config dal server (DATA sheet) ===== */
 (async function loadCfg(){
   try{
     const cfg = await GET('mode=cfg');
@@ -163,7 +167,7 @@ async function POST(body){ const r=await fetch(APP,{method:'POST',headers:{'Cont
   }catch(_){}
 })();
 
-/* ===== Preview 300×300 ===== */
+/* ===== Anteprima ===== */
 function drawPreview(){
   if(!hasStream()){ rafId=requestAnimationFrame(drawPreview); return; }
   const ctx=thumb.getContext('2d'); const tw=thumb.width, th=thumb.height; const vw=video.videoWidth, vh=video.videoHeight; if(!vw||!vh){ rafId=requestAnimationFrame(drawPreview); return; }
@@ -173,40 +177,13 @@ function drawPreview(){
   rafId=requestAnimationFrame(drawPreview);
 }
 
-/* ===== Flusso 1 pulsante: Apri → Condividi ===== */
-function openClean(u){
-  const url=(u||'').trim(); if(!url){ alert('URL obbligatoria'); return false; }
-  const features='noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no';
-  window.open(url, '_we_clean_'+Date.now(), features);
-  log('Finestra/pagina aperta.');
-  return true;
-}
-$('btnFlow').addEventListener('click', async ()=>{
-  if(flowStage===0){
-    if(openClean(addr.value)){ flowStage=1; $('btnFlow').textContent='Condividi'; setActive($('btnFlow'), true); }
-  }else if(flowStage===1){
-    try{
-      const constraints={video:{displaySurface:'window',preferCurrentTab:true},audio:false};
-      stream = await navigator.mediaDevices.getDisplayMedia(constraints);
-      video.srcObject = stream; await video.play();
-      if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview);
-      log('Condivisione attiva (anteprima LIVE in alto a sinistra).');
-      const vt = stream.getVideoTracks()[0];
-      vt.addEventListener('ended', ()=>{ log('Condivisione terminata'); flowStage=1; $('btnFlow').textContent='Condividi'; enable($('btnStart'), false); enable($('btnSnap'), false); enable($('btnSave'), false); });
-      flowStage=2;
-      enable($('btnStart'), true); setActive($('btnStart'), true);
-      setActive($('btnFlow'), false);
-    }catch(e){ alert('Condivisione negata: '+(e.message||e)); }
-  }
-});
-
-/* ===== START ===== */
+/* ===== START PRIMA DI TUTTO ===== */
 $('btnStart').onclick = async ()=>{
   const cli=client.value.trim(), u=(addr.value||'').trim();
   if(!cli){ alert('Cliente obbligatorio'); return; }
   if(!u){ alert('URL obbligatoria'); return; }
   let domOverride = client.dataset.domain||parseHost(u);
-  setState('Creo sessione…'); enable($('btnStart'), false); setActive($('btnStart'), true);
+  setState('Creo sessione…'); setActive($('btnStart'), true);
   const js=await GET(
     'mode=start'
     +'&t='+encodeURIComponent(TOKEN||'')
@@ -219,47 +196,92 @@ $('btnStart').onclick = async ()=>{
     +'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)
     +'&page='+encodeURIComponent(location.href||'')
   );
-  if(!js.ok){ alert(js.error||'Errore avvio'); setState('Errore'); enable($('btnStart'), true); setActive($('btnStart'), true); return; }
+  if(!js.ok){ alert(js.error||'Errore avvio'); setState('Errore'); setActive($('btnStart'), false); return; }
   SID=js.sessionId;
   log('Sessione: '+js.base+(js.folderUrl?('  →  '+js.folderUrl):''));
+  if(js.trace && js.trace.length){ js.trace.forEach(line => log(line)); } // LOG DETTAGLIATI DAL SERVER
   setState('Pronto'); note('SESSION_START',{base:js.base});
-  enable($('btnFull'), true); enable($('btnAssets'), true);
-  enable($('btnSnap'), true); enable($('btnReset'), true);
-  enable($('btnSave'), false);
-  enable($('btnFinish'), true);
-  setActive($('btnStart'), false);
+
+  // Abilita Apri, poi Condividi
+  enable($('btnOpen'), true); setActive($('btnStart'), false);
+  // Sostituisci Start con Termina (stessa posizione)
+  $('btnStart').style.display='none';
+  $('btnFinish').style.display='inline-block';
 };
 
-/* ===== FULL PAGE / ASSET ===== */
+/* ===== Apri e Condividi ===== */
+$('btnOpen').onclick = ()=>{
+  const url=(addr.value||'').trim(); if(!url){ alert('URL obbligatoria'); return; }
+  const features='noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no';
+  window.open(url, '_we_clean_'+Date.now(), features);
+  log('Finestra/pagina aperta.');
+  enable($('btnShare'), true);
+};
+$('btnShare').onclick = async ()=>{
+  try{
+    const constraints={video:{displaySurface:'window',preferCurrentTab:true},audio:false};
+    stream = await navigator.mediaDevices.getDisplayMedia(constraints);
+    video.srcObject = stream; await video.play();
+    if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview);
+    log('Condivisione attiva (anteprima LIVE in alto a sinistra).');
+    const vt = stream.getVideoTracks()[0];
+    vt.addEventListener('ended', ()=>{ log('Condivisione terminata'); enable($('btnSnap'), false); enable($('btnSave'), false); $('btnShare').disabled=false; $('btnShare').classList.remove('dim'); });
+    // dopo la condivisione disattivo il tasto Share
+    $('btnShare').disabled=true; $('btnShare').classList.add('dim');
+    // Abilita comandi post-start
+    enable($('btnFull'), true); enable($('btnAssets'), true);
+    enable($('btnSnap'), true);
+  }catch(e){ alert('Condivisione negata: '+(e.message||e)); }
+};
+
+/* ===== FULL PAGE (SM 1920x1240 + 1920xfull) + PSI ===== */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
-  setActive($('btnFull'), true); setActive($('btnAssets'), false);
-  log('Eseguo Screenshot cattura completa…');
+  setActive($('btnFull'), true); enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false);
   try{
-    const sm=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920xfull');
-    if(!sm.ok){ throw new Error(sm.error||'SM error'); }
-    const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:sm.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screenshotmachine',label:'SM_FULL'}}});
-    if(!sv.ok) throw new Error(sv.error||'Save error');
-    log('Full-page salvato: '+sv.name+' sha='+sv.sha256); note('SM_FULL_SAVED',{name:sv.name,sha:sv.sha256});
+    // SM 1920x1240
+    log('SM 1920x1240 in corso…');
+    let sm1=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240');
+    if(!sm1.ok) throw new Error(sm1.error||'SM (1240) error');
+    let sv1=await POST({authToken:TOKEN,sid:SID,dataUrl:sm1.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920x1240'}}});
+    log('SM 1920x1240 salvato: '+sv1.name+' sha='+sv1.sha256);
+
+    // SM 1920xfull
+    log('SM 1920xfull in corso…');
+    let sm2=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920xfull');
+    if(!sm2.ok) throw new Error(sm2.error||'SM (full) error');
+    let sv2=await POST({authToken:TOKEN,sid:SID,dataUrl:sm2.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920xfull'}}});
+    log('SM 1920xfull salvato: '+sv2.name+' sha='+sv2.sha256);
+
+    // PSI final screenshot (se configurato)
+    log('PSI final screenshot…');
+    let psi=await GET('mode=psi&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u));
+    if(psi.ok && psi.dataUrl){
+      let sv3=await POST({authToken:TOKEN,sid:SID,dataUrl:psi.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'psi',label:'PSI_FINAL'}}});
+      log('PSI salvato: '+sv3.name+' sha='+sv3.sha256);
+    }else{
+      log('PSI non disponibile (manca key o nessuna immagine).');
+    }
   }catch(e){ log('Errore full-page: '+(e.message||e)); }
-  setActive($('btnFull'), false);
+  setActive($('btnFull'), false); enable($('btnAssets'), true); enable($('btnSnap'), true);
 };
 
+/* ===== ASSET ===== */
 $('btnAssets').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
-  setActive($('btnAssets'), true); setActive($('btnFull'), false);
-  log('Scarico asset…');
+  setActive($('btnAssets'), true); enable($('btnFull'), false); enable($('btnSnap'), false); enable($('btnSave'), false);
+  log('Scarico asset… attendere');
   try{
     const sj=await GET('mode=snapshot&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+'&u='+encodeURIComponent(u));
     if(!sj.ok) throw new Error(sj.error||'Snapshot error');
-    log('HTML+asset salvati.'); note('ASSETS_SAVED');
+    log('HTML+asset salvati: '+sj.count);
   }catch(e){ log('Errore asset: '+(e.message||e)); }
-  setActive($('btnAssets'), false);
+  setActive($('btnAssets'), false); enable($('btnFull'), true); enable($('btnSnap'), true);
 };
 
-/* ===== Fence + Scatto ===== */
+/* ===== Fence + Scatto + Salva ===== */
 (function fence(){
   let drag=false,sx=0,sy=0;
   function bounds(e){ const r=capWrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
@@ -281,7 +303,7 @@ $('btnAssets').onclick = async ()=>{
 $('btnSnap').onclick = async ()=>{
   const live = (stream && stream.getVideoTracks().length && stream.getVideoTracks()[0].readyState==='live');
   if(!live){ log('Condivisione non attiva: premi “Condividi” e riprova.'); enable($('btnSnap'), false); return; }
-  setActive($('btnSnap'), true);
+  setActive($('btnSnap'), true); enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSave'), false);
   try{
     const track=stream.getVideoTracks()[0]; const cap=new ImageCapture(track);
     const bitmap=await cap.grabFrame();
@@ -291,7 +313,7 @@ $('btnSnap').onclick = async ()=>{
     log('Scatto eseguito → immagine grande pronta.');
     note('SNAP_OK',{w:bitmap.width,h:bitmap.height});
   }catch(e){ log('Errore scatto: '+(e.message||e)); }
-  setActive($('btnSnap'), false);
+  setActive($('btnSnap'), false); enable($('btnFull'), true); enable($('btnAssets'), true);
 };
 
 function makePayload(){
@@ -317,17 +339,18 @@ $('btnSave').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   if(!hasShot){ alert('Fai prima uno scatto'); return; }
   const payload = await makePayload(); if(!payload){ alert('Nessuna immagine'); return; }
-  setActive($('btnSave'), true);
+  setActive($('btnSave'), true); enable($('btnFull'), false); enable($('btnAssets'), false);
   const u=(addr.value||'').trim();
   const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-capture',label:(payload.crop?'FRAME_CROP':'FRAME_FULL')},crop:payload.crop}});
   if(!sv.ok){ alert(sv.error||'Errore salvataggio'); setActive($('btnSave'), false); return; }
   log('PNG salvato: '+sv.name+' sha='+sv.sha256); note('PNG_SAVED',{name:sv.name,sha:sv.sha256});
-  setActive($('btnSave'), false);
+  setActive($('btnSave'), false); enable($('btnFull'), true); enable($('btnAssets'), true);
 };
 
+/* ===== Termina ===== */
 $('btnFinish').onclick = async ()=>{
   if(!SID){ alert('Nessuna sessione'); return; }
-  setState('Creo ZIP…');
+  setState('Creo ZIP…'); setActive($('btnFinish'), true);
   const q='mode=finish'
     +'&t='+encodeURIComponent(TOKEN||'')
     +'&id='+encodeURIComponent(SID)
@@ -335,7 +358,7 @@ $('btnFinish').onclick = async ()=>{
     +(subj.value?('&subj='+encodeURIComponent(subj.value)):'')
     +'&pecMode='+encodeURIComponent(document.getElementById('pecMode').value);
   const js=await GET(q);
-  if(!js.ok){ alert(js.error||'Errore finish'); setState('Errore'); return; }
+  if(!js.ok){ alert(js.error||'Errore finish'); setState('Errore'); setActive($('btnFinish'), false); return; }
   log('ZIP: '+js.zipUrl); setState('Completato');
   document.querySelectorAll('button').forEach(b=> b.disabled=true);
 };
