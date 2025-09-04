@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v14.1</title>
+<title>Web Evidence – v14.2</title>
 <style>
   :root{--bd:#ddd;--accent:#0b5cff;--mut:#666}
   *{box-sizing:border-box}
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0;color:#111;background:#fff}
   header{display:grid;grid-template-columns:170px 1fr auto auto 260px 1fr auto auto auto;gap:8px;align-items:center;border-bottom:1px solid #eee;padding:10px}
-  input,button,select{padding:8px;border:1px solid var(--bd);border-radius:10px;background:#fafafa}
+  input,button,select,a.btn{padding:8px;border:1px solid var(--bd);border-radius:10px;background:#fafafa;text-decoration:none;color:inherit;display:inline-block;text-align:center}
   input[type="url"], input[type="text"]{background:#fff}
-  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary,a.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
   button[disabled]{opacity:.55;cursor:not-allowed}
   #state{justify-self:end;font-size:12px;color:#222;background:#f3f4f6;border-radius:999px;padding:.25rem .6rem}
 
@@ -33,7 +33,6 @@
   #rect{position:absolute;border:2px dashed #fff;outline:9999px solid rgba(0,0,0,.35);display:none;pointer-events:none}
 
   #log{height:180px;border:1px solid #eee;border-radius:10px;padding:8px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;background:#fafafa;white-space:pre-wrap}
-  details{border:1px solid #eee;border-radius:10px;padding:8px 12px;margin:8px 12px}
 </style>
 </head>
 <body>
@@ -41,17 +40,18 @@
 <header>
   <input id="client" placeholder="Cliente…" />
   <input id="addr" type="url" placeholder="https://…" />
-  <button id="btnOpen">Apri finestra pulita</button>
-  <button id="btnPreview" class="primary">Seleziona finestra</button>
+  <button id="btnOpen" type="button">Apri finestra pulita</button>
+  <a id="aOpen" class="btn" href="#" target="_blank" rel="noopener noreferrer">Apri in nuova scheda</a>
 
   <input id="rcpts" placeholder="Destinatari PEC/email" />
   <input id="subj" value="Web Evidence – Pacchetto prove" />
   <select id="pecMode" title="Modalità invio PEC">
+    <option value="auto">PEC auto</option>
     <option value="normal">PEC normale</option>
     <option value="key">PEC via KEY</option>
   </select>
-  <button id="btnStart">Inizia certificazione</button>
-  <button id="btnFinish" disabled>Termina</button>
+  <button id="btnStart" type="button">Inizia certificazione</button>
+  <button id="btnFinish" type="button" disabled>Termina</button>
 
   <span id="state">Pronto</span>
 </header>
@@ -72,9 +72,9 @@
         <label><input type="checkbox" id="chkAssets"> Scarica asset</label>
       </div>
       <div class="row">
-        <button id="btnSnap">Scatta</button>
-        <button id="btnSave" class="primary">Salva</button>
-        <button id="btnReset">Reset</button>
+        <button id="btnSnap" type="button">Scatta</button>
+        <button id="btnSave" class="primary" type="button">Salva</button>
+        <button id="btnReset" type="button">Reset</button>
       </div>
     </div>
   </div>
@@ -89,17 +89,6 @@
   </div>
 </div>
 
-<details>
-  <summary><b>FAQ & Istruzioni rapide</b></summary>
-  <ol>
-    <li><b>Anteprima LIVE</b>: miniatura 300×300 che clona la finestra condivisa.</li>
-    <li><b>Scatto</b>: finisce nell’area grande; trascina per ritagliare (fence). <i>Salva</i> crea PNG con SHA.</li>
-    <li><b>Start</b>: se spunti “Screenshot cattura completa” (SM) e/o “Scarica asset”, il server li esegue subito allo start.</li>
-    <li><b>Finish</b>: genera MANIFEST (SHA), aggiorna index.html e crea lo ZIP. Seleziona <b>PEC normale</b> o <b>PEC via KEY</b> prima di terminare.</li>
-    <li><b>Token</b>: passa <code>&t=…</code> nell’URL della Web App. <b>Client</b> e <b>URL</b> sono obbligatori.</li>
-  </ol>
-</details>
-
 <div style="padding:8px 12px"><b>Log</b></div>
 <div id="log"></div>
 
@@ -109,7 +98,10 @@ const qs=new URLSearchParams(location.search);
 const APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
 if(qs.get('u')) addr.value=qs.get('u');
 if(qs.get('client')) client.value=qs.get('client');
+if(qs.get('dom')) client.dataset.domain=qs.get('dom'); // opz: dominio esplicito
+if(qs.get('domain')) client.dataset.domain=qs.get('domain');
 if(qs.get('to')) rcpts.value=qs.get('to');
+if(qs.get('email')) rcpts.value=qs.get('email');
 if(qs.get('subj')) subj.value=qs.get('subj');
 if(qs.get('pecMode')) document.getElementById('pecMode').value=qs.get('pecMode');
 
@@ -137,11 +129,18 @@ function drawPreview(){
 }
 
 /* ===== Apertura finestra pulita + Selezione ===== */
-$('btnOpen').onclick = ()=>{
-  const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
-  window.open(u, '_we_clean_'+Date.now(), 'noopener,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no');
-  log('Finestra/pagina aperta. Ora premi “Seleziona finestra”.');
-};
+function openClean(u){
+  const url=(u||'').trim(); if(!url){ alert('URL obbligatoria'); return; }
+  // doppio canale: popup e ancora (per aggirare eventuale block dei popup)
+  const features='noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no';
+  const w = window.open(url, '_we_clean_'+Date.now(), features);
+  $('aOpen').href = url;
+  log('Finestra/pagina aperta. Se il browser blocca i popup, usa “Apri in nuova scheda”.');
+  return w;
+}
+$('btnOpen').addEventListener('click', ()=> openClean(addr.value));
+$('aOpen').addEventListener('click', ()=> log('Apertura in nuova scheda richiesta.'));
+
 $('btnPreview').onclick = async ()=>{
   try{
     const constraints={video:{displaySurface:'window',preferCurrentTab:true},audio:false};
@@ -163,9 +162,11 @@ $('btnStart').onclick = async ()=>{
   if(!cli){ alert('Cliente obbligatorio'); return; }
   if(!u){ alert('URL obbligatoria'); return; }
   const full=$('chkFull').checked?1:0; const assets=$('chkAssets').checked?1:0;
+  const domOverride = client.dataset.domain||'';
   setState('Creo sessione…');
   const js=await GET('mode=start&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)
     +'&client='+encodeURIComponent(cli)
+    +(domOverride?('&domain='+encodeURIComponent(domOverride)):'')
     +'&full='+full+'&assets='+assets
     +'&ua='+encodeURIComponent(navigator.userAgent||'')
     +'&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')
@@ -182,7 +183,8 @@ $('btnFinish').onclick = async ()=>{
   setState('Creo ZIP…');
   const js=await GET('mode=finish&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)
     +(rcpts.value?('&to='+encodeURIComponent(rcpts.value)):'')
-    +(subj.value?('&subj='+encodeURIComponent(subj.value)):''))+('&pecMode='+encodeURIComponent(document.getElementById('pecMode').value)));
+    +(subj.value?('&subj='+encodeURIComponent(subj.value)):''))
+    +('&pecMode='+encodeURIComponent(document.getElementById('pecMode').value));
   if(!js.ok){ alert(js.error||'Errore finish'); setState('Errore'); return; }
   log('ZIP: '+js.zipUrl); setState('Completato'); note('SESSION_FINISH',{zip:js.zipUrl});
   document.querySelectorAll('button').forEach(b=> b.disabled=true);
@@ -191,7 +193,7 @@ $('btnFinish').onclick = async ()=>{
 /* ===== Fence + Scatto ===== */
 (function fence(){
   let drag=false,sx=0,sy=0;
-  function bounds(e){ const r=capWrap.getBoundingClientRect(); return {x=Math.max(0,Math.min(e.clientX-r.left,r.width)), y=Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
+  function bounds(e){ const r=capWrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
   capWrap.addEventListener('pointerdown', e=>{
     if(!imgLarge.classList.contains('hasSrc')) return;
     if(e.button!==0 && e.pointerType==='mouse') return;
