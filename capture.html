@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v14.6</title>
+<title>Web Evidence – v14.7</title>
 <style>
   :root{--bd:#ddd;--accent:#0b5cff}
   *{box-sizing:border-box}
@@ -19,7 +19,6 @@
   button[disabled]{opacity:.55;cursor:not-allowed}
   #state{justify-self:end;font-size:12px;color:#222;background:#f3f4f6;border-radius:999px;padding:.25rem .6rem}
 
-  /* layout: preview (left) + center (controls+capture) + log (right) */
   .wrap{display:grid;grid-template-columns:320px 1fr 360px;gap:12px;padding:12px}
   .card{border:1px solid #eee;border-radius:12px;background:#fff}
   .card h3{margin:0;padding:10px 12px;border-bottom:1px solid #f3f4f4;font-size:13px;font-weight:700}
@@ -29,20 +28,18 @@
 
   .controls{display:flex;flex-direction:column;gap:10px;padding:12px}
   .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .dim{opacity:.6}
 
   .capture{grid-column:2}
-  .cap-wrap{position:relative;padding:12px}
+  .cap-wrap{position:relative;padding:12px;overflow:auto}
   #imgLarge{max-width:100%;display:none;border-radius:12px;border:1px solid #eee;background:#000}
   #imgLarge.hasSrc{display:block}
-  /* Fence senza overlay grigio */
-  #rect{position:absolute;border:2px dashed #fff;display:none;pointer-events:none}
+  #rect{position:absolute;border:2px dashed #fff;display:none;pointer-events:none} /* niente overlay grigio */
 
-  /* right log panel con altezza dinamica */
   .logcol{grid-column:3; display:flex; flex-direction:column; gap:10px}
   #log{border:1px solid #eee;border-radius:10px;padding:8px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;background:#fafafa;white-space:pre-wrap}
 
   .mut{color:#666}
-  .dim{opacity:.65}
 </style>
 </head>
 <body>
@@ -50,7 +47,7 @@
 <header id="topbar">
   <input id="client" placeholder="Cliente…" />
   <input id="addr" type="url" placeholder="https://…" />
-  <!-- Pulsante di flusso: 1) Apri sito → 2) Condividi -->
+  <!-- Flusso: 1) Apri → 2) Condividi -->
   <button id="btnFlow" class="primary" type="button">Apri sito in finestra</button>
 
   <input id="rcpts" placeholder="Destinatari PEC/email" />
@@ -67,32 +64,32 @@
 </header>
 
 <div class="wrap">
-  <!-- Colonna sinistra: ANTEPRIMA LIVE 300×300 -->
+  <!-- Colonna sinistra: ANTEPRIMA 300×300 -->
   <div class="card side" style="grid-column:1">
     <h3>Anteprima LIVE (300×300)</h3>
     <canvas id="thumb" width="300" height="300" aria-label="Anteprima"></canvas>
-    <div class="mut" style="margin-top:8px">1) Apri sito → 2) Condividi → 3) Inizia</div>
+    <div class="mut" style="margin-top:8px">1) Apri → 2) Condividi → 3) Inizia</div>
   </div>
 
   <!-- Colonna centrale: CONTROLLI -->
   <div class="card" style="grid-column:2">
     <h3>Controlli</h3>
-    <div class="controls">
-      <!-- RIGA 1: i due pulsanti “sopra” -->
+    <div class="controls" id="controlsBox">
+      <!-- SOPRA -->
       <div class="row">
         <button id="btnFull" type="button" disabled class="dim">Screenshot cattura completa</button>
         <button id="btnAssets" type="button" disabled class="dim">Scarica asset</button>
       </div>
-      <!-- RIGA 2: scatto e salvataggio -->
+      <!-- SOTTO -->
       <div class="row">
         <button id="btnSnap" type="button" disabled class="dim">Scatta</button>
-        <button id="btnSave" class="primary" type="button" disabled>Salva</button>
+        <button id="btnSave" type="button" disabled class="dim">Salva</button>
         <button id="btnReset" type="button" disabled class="dim">Reset</button>
       </div>
     </div>
   </div>
 
-  <!-- Finestra di cattura (immagine scattata + fence) -->
+  <!-- Finestra di cattura -->
   <div class="card capture">
     <h3>Finestra di cattura (scatto)</h3>
     <div class="cap-wrap" id="capWrap">
@@ -101,7 +98,7 @@
     </div>
   </div>
 
-  <!-- Colonna destra: LOG -->
+  <!-- Log -->
   <div class="logcol">
     <div class="card">
       <h3>Log</h3>
@@ -130,26 +127,23 @@ const $ = id => document.getElementById(id);
 const video = document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
 const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWrap');
 
-/* ===== Layout dinamico (altezza cattura + log = viewport) ===== */
-function sizePanels(){
-  const headerH = $('topbar').offsetHeight;
-  const h = Math.max(240, window.innerHeight - headerH - 24 /*padding*/);
-  capWrap.style.maxHeight = h + 'px';
-  $('log').style.height = h + 'px';
+/* ===== Altezze dinamiche: cattura + log partono sotto i pulsanti e riempiono fino a fondo ===== */
+function setHeights(){
+  const top = document.getElementById('controlsBox').getBoundingClientRect().bottom + window.scrollY + 12;
+  const avail = window.innerHeight - (document.getElementById('topbar').getBoundingClientRect().height) - (document.getElementById('controlsBox').getBoundingClientRect().height) - 40;
+  capWrap.style.height = Math.max(360, avail) + 'px';
+  document.getElementById('log').style.height = Math.max(360, avail) + 'px';
 }
-sizePanels(); window.addEventListener('resize', sizePanels);
+setHeights(); window.addEventListener('resize', setHeights);
 
 /* ===== Helpers ===== */
 const setState = s => $('state').textContent=s;
-function setDim(el, on){ el.classList.toggle('dim', !!on); }
-function enable(el, on, active=false){
-  el.disabled = !on;
-  setDim(el, !on || !active);
-  if(active) el.classList.add('primary'); else el.classList.remove('primary');
-}
+function setDim(el, on){ el.classList.toggle('dim', !!on); el.classList.toggle('primary', !on?false:el.classList.contains('primary')); }
+function setActive(el, active){ if(active){ el.classList.add('primary'); }else{ el.classList.remove('primary'); } }
+function enable(el, on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const log = s => { const L=$('log'); L.textContent+=(L.textContent?'\\n':'')+'['+(new Date().toLocaleTimeString())+'] '+s; L.scrollTop=L.scrollHeight; setState(s); };
 async function note(type, data={}){ if(!SID) return; const q='mode=note&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)+'&msg='+encodeURIComponent(type+' '+JSON.stringify(data)); try{ await fetch(APP+(APP.includes('?')?'&':'?')+q); }catch(_){}}; 
-function hasStream(){ return !!(video.srcObject && video.videoWidth); }
+function hasStream(){ return !!(video.srcObject && video.getVideoTracks().length && video.videoWidth); }
 function parseHost(u){ try{ return new URL(u).hostname.replace(/^www\\./,''); }catch(e){ const a=document.createElement('a'); a.href=u; return (a.hostname||'').replace(/^www\\./,''); } }
 
 function drawPreview(){
@@ -171,7 +165,7 @@ function openClean(u){
 }
 $('btnFlow').addEventListener('click', async ()=>{
   if(flowStage===0){
-    if(openClean(addr.value)){ flowStage=1; $('btnFlow').textContent='Condividi'; enable($('btnFlow'), true, true); }
+    if(openClean(addr.value)){ flowStage=1; $('btnFlow').textContent='Condividi'; setActive($('btnFlow'), true); }
   }else if(flowStage===1){
     try{
       const constraints={video:{displaySurface:'window',preferCurrentTab:true},audio:false};
@@ -179,12 +173,11 @@ $('btnFlow').addEventListener('click', async ()=>{
       video.srcObject = stream; await video.play();
       if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview);
       log('Condivisione attiva (anteprima LIVE in alto a sinistra).');
-      stream.getVideoTracks()[0].addEventListener('ended', ()=>{ log('Condivisione terminata'); if(rafId){ cancelAnimationFrame(rafId); rafId=null; } flowStage=1; $('btnFlow').textContent='Condividi'; enable($('btnStart'), false); });
-      note('PREVIEW_START');
+      const vt = stream.getVideoTracks()[0];
+      vt.addEventListener('ended', ()=>{ log('Condivisione terminata'); flowStage=1; $('btnFlow').textContent='Condividi'; enable($('btnStart'), false); enable($('btnSnap'), false); enable($('btnSave'), false); });
       flowStage=2;
-      // Attiva solo “Inizia certificazione”
-      enable($('btnStart'), true, true);
-      enable($('btnFlow'), true, false);
+      enable($('btnStart'), true); setActive($('btnStart'), true);
+      setActive($('btnFlow'), false);
     }catch(e){ alert('Condivisione negata: '+(e.message||e)); }
   }
 });
@@ -198,36 +191,36 @@ $('btnStart').onclick = async ()=>{
   if(!cli){ alert('Cliente obbligatorio'); return; }
   if(!u){ alert('URL obbligatoria'); return; }
   let domOverride = client.dataset.domain||parseHost(u);
-  setState('Creo sessione…');
-  enable($('btnStart'), false); // evita doppi click
+  setState('Creo sessione…'); enable($('btnStart'), false); setActive($('btnStart'), true);
   const js=await GET(
     'mode=start'
     +'&t='+encodeURIComponent(TOKEN)
     +'&u='+encodeURIComponent(u)
     +'&client='+encodeURIComponent(cli)
     +(domOverride?('&domain='+encodeURIComponent(domOverride)):'')
-    +'&full=0&assets=0'
     +'&ua='+encodeURIComponent(navigator.userAgent||'')
     +'&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')
     +'&lang='+encodeURIComponent(navigator.language||'')
     +'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)
     +'&page='+encodeURIComponent(location.href||'')
   );
-  if(!js.ok){ alert(js.error||'Errore avvio'); setState('Errore'); enable($('btnStart'), true, true); return; }
-  SID=js.sessionId; log('Sessione: '+js.base); setState('Pronto'); note('SESSION_START',{base:js.base});
+  if(!js.ok){ alert(js.error||'Errore avvio'); setState('Errore'); enable($('btnStart'), true); setActive($('btnStart'), true); return; }
+  SID=js.sessionId;
+  log('Sessione: '+js.base+(js.folderUrl?('  →  '+js.folderUrl):''));
+  setState('Pronto'); note('SESSION_START',{base:js.base});
   // Attiva tutti i comandi
   enable($('btnFull'), true); enable($('btnAssets'), true);
   enable($('btnSnap'), true); enable($('btnReset'), true);
-  enable($('btnSave'), false); // serve uno scatto prima
+  enable($('btnSave'), false);
   enable($('btnFinish'), true);
+  setActive($('btnStart'), false);
 };
 
 /* ===== Azioni: Full page (SM) e Asset ===== */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
-  enable($('btnFull'), true, true);
-  enable($('btnAssets'), true, false);
+  setActive($('btnFull'), true); setActive($('btnAssets'), false);
   log('Eseguo Screenshot cattura completa…');
   try{
     const sm=await GET('mode=sm&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)+'&dim=1920xfull');
@@ -236,21 +229,20 @@ $('btnFull').onclick = async ()=>{
     if(!sv.ok) throw new Error(sv.error||'Save error');
     log('Full-page salvato: '+sv.name+' sha='+sv.sha256); note('SM_FULL_SAVED',{name:sv.name,sha:sv.sha256});
   }catch(e){ log('Errore full-page: '+(e.message||e)); }
-  enable($('btnFull'), true, false);
+  setActive($('btnFull'), false);
 };
 
 $('btnAssets').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
-  enable($('btnAssets'), true, true);
-  enable($('btnFull'), true, false);
+  setActive($('btnAssets'), true); setActive($('btnFull'), false);
   log('Scarico asset…');
   try{
     const sj=await GET('mode=snapshot&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)+'&u='+encodeURIComponent(u));
     if(!sj.ok) throw new Error(sj.error||'Snapshot error');
     log('HTML+asset salvati.'); note('ASSETS_SAVED');
   }catch(e){ log('Errore asset: '+(e.message||e)); }
-  enable($('btnAssets'), true, false);
+  setActive($('btnAssets'), false);
 };
 
 /* ===== Fence + Scatto ===== */
@@ -273,17 +265,20 @@ $('btnAssets').onclick = async ()=>{
 })();
 
 $('btnSnap').onclick = async ()=>{
-  if(!hasStream()){ alert('Attiva “Condividi”'); return; }
-  enable($('btnSnap'), true, true);
+  if(!hasStream() || !stream || stream.getVideoTracks()[0].readyState!=='live'){
+    log('Condivisione non attiva: premi “Condividi” e riprova.'); enable($('btnSnap'), false); return;
+  }
+  setActive($('btnSnap'), true);
   try{
     const track=stream.getVideoTracks()[0]; const cap=new ImageCapture(track);
     const bitmap=await cap.grabFrame();
     const c=document.createElement('canvas'); c.width=bitmap.width; c.height=bitmap.height; c.getContext('2d').drawImage(bitmap,0,0);
     imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
-    hasShot=true; enable($('btnSave'), true, true); log('Scatto eseguito → immagine grande pronta.');
+    hasShot=true; enable($('btnSave'), true); setActive($('btnSave'), true);
+    log('Scatto eseguito → immagine grande pronta.');
     note('SNAP_OK',{w:bitmap.width,h:bitmap.height});
   }catch(e){ log('Errore scatto: '+(e.message||e)); }
-  enable($('btnSnap'), true, false);
+  setActive($('btnSnap'), false);
 };
 
 function makePayload(){
@@ -309,12 +304,12 @@ $('btnSave').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   if(!hasShot){ alert('Fai prima uno scatto'); return; }
   const payload = await makePayload(); if(!payload){ alert('Nessuna immagine'); return; }
-  enable($('btnSave'), true, true);
+  setActive($('btnSave'), true);
   const u=(addr.value||'').trim();
   const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-capture',label:(payload.crop?'FRAME_CROP':'FRAME_FULL')},crop:payload.crop}});
-  if(!sv.ok){ alert(sv.error||'Errore salvataggio'); enable($('btnSave'), true, false); return; }
+  if(!sv.ok){ alert(sv.error||'Errore salvataggio'); setActive($('btnSave'), false); return; }
   log('PNG salvato: '+sv.name+' sha='+sv.sha256); note('PNG_SAVED',{name:sv.name,sha:sv.sha256});
-  enable($('btnSave'), true, false);
+  setActive($('btnSave'), false);
 };
 
 $('btnFinish').onclick = async ()=>{
