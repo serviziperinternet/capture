@@ -3,412 +3,283 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v13</title>
+<title>Web Evidence – v13.2</title>
 <style>
   :root{--mut:#666;--bd:#ddd;--accent:#0052ff;--ok:#0a8;--warn:#c80}
   *{box-sizing:border-box}
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0;background:#fafafa}
-  header{display:flex;gap:8px;flex-wrap:wrap;align-items:center;border-bottom:1px solid #eee;padding:10px;background:#fff;position:sticky;top:0;z-index:2}
+  header{display:grid;grid-template-columns:1fr auto;gap:8px;border-bottom:1px solid #eee;padding:10px;background:#fff}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
   input,select,button{padding:8px;border:1px solid var(--bd);border-radius:8px;background:#fff}
   button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
   button[disabled]{opacity:.55;cursor:not-allowed}
-  #status{margin-left:auto;font-size:12px;color:var(--mut)}
-  main{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:12px}
+  #status{justify-self:end;font-size:12px;color:var(--mut)}
+  main{display:grid;grid-template-columns:420px 1fr;gap:12px;padding:12px}
   .card{background:#fff;border:1px solid #eee;border-radius:12px;padding:12px}
   .title{font-weight:600;margin-bottom:6px}
-  #mini{width:100%;height:120px;background:#000;border-radius:8px}
-  #bigPreview{width:100%;background:#f7f7f7;border-radius:8px;min-height:420px;display:flex;align-items:center;justify-content:center}
-  #bigPreview img{max-width:100%;max-height:70vh;border-radius:8px}
+  #mini{width:300px;height:300px;background:#000;border-radius:8px}
+  #big{min-height:70vh;background:#fff;border:1px dashed #ddd;border-radius:12px;display:flex;align-items:center;justify-content:center;padding:8px}
+  #big img{max-width:100%;max-height:70vh;border-radius:8px}
   #cropWrap{position:relative;display:inline-block}
   #rect{position:absolute;border:2px dashed #000;background:rgba(0,0,0,.15);display:none;pointer-events:none}
-  #logLive{font:12px/1.45 ui-monospace,SFMono,Menlo,Consolas,monospace;background:#0a0a0a;color:#d0d0d0;height:160px;overflow:auto;padding:8px;border-radius:8px;white-space:pre-wrap}
-  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  .mut{color:#777}
-  .on{box-shadow:0 0 0 2px rgba(0,82,255,.2) inset}
+  #logLive{font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;background:#0a0a0a;color:#d0d0d0;height:180px;overflow:auto;padding:8px;border-radius:8px;white-space:pre-wrap}
+  .on{box-shadow:0 0 0 2px rgba(0,82,255,.25) inset}
+  label.ck{display:inline-flex;align-items:center;gap:6px}
 </style>
 </head>
 <body>
 
 <header>
-  <input id="cliente" type="text" placeholder="Cliente…" style="width:180px" required>
-  <input id="addr" class="grow" type="url" placeholder="https://…" style="min-width:380px">
-  <label>Modalità:</label>
-  <select id="modeCert" title="BASIC: solo PEC finale; SEMI: carichi .p7m/.tsr; AUTO: usa relay HSM/TSA">
-    <option value="BASIC_PEC" selected>BASIC_PEC</option>
-    <option value="SEMI_KEY_TSA">SEMI_KEY_TSA</option>
-    <option value="AUTO_HSM_TSA">AUTO_HSM_TSA</option>
-  </select>
-  <span class="mut">Destinatari PEC:</span><input id="rcpts" type="text" placeholder="a@pec.it, b@pec.it" style="width:260px">
-  <span class="mut">Oggetto:</span><input id="subj" type="text" placeholder="Web Evidence – Bundle" style="width:220px">
-  <span id="status">Pronto</span>
-  <div class="row" style="width:100%;gap:8px;margin-top:6px">
+  <div class="row">
+    <input id="cliente" type="text" placeholder="Cliente…" style="width:180px" required>
+    <input id="addr" type="url" placeholder="https://…" style="min-width:340px">
+    <button id="btnOpenSite">Apri sito in nuova finestra</button>
+    <select id="modeCert" title="BASIC: solo PEC finale; SEMI: carichi .p7m/.tsr; AUTO: relay HSM/TSA">
+      <option value="BASIC_PEC" selected>BASIC_PEC</option>
+      <option value="SEMI_KEY_TSA">SEMI_KEY_TSA</option>
+      <option value="AUTO_HSM_TSA">AUTO_HSM_TSA</option>
+    </select>
+    <label class="ck"><input type="checkbox" id="autoSnap" checked> Auto Snapshot</label>
+    <label class="ck"><input type="checkbox" id="autoSM"> Auto SM+PSI</label>
+    <label class="ck"><input type="checkbox" id="autoFirst"> Auto Primo Scatto</label>
+  </div>
+  <div id="status">Pronto</div>
+  <div class="row" style="grid-column:1/-1">
     <button id="btnShare" class="primary">Condividi schermo</button>
     <button id="btnStartCert" disabled>Inizia certificazione</button>
     <button id="btnFinishCert" disabled>Termina certificazione</button>
+    <span style="margin-left:auto" class="row">
+      <span>PEC:</span><input id="rcpts" type="text" placeholder="a@pec.it" style="width:240px">
+      <input id="subj" type="text" placeholder="Oggetto PEC" style="width:220px">
+    </span>
   </div>
 </header>
 
 <main>
-  <!-- Colonna sinistra: anteprima mini + controlli di scatto/record -->
   <div class="card">
-    <div class="title">Anteprima condivisione (mini)</div>
+    <div class="title">Anteprima condivisione (300×300)</div>
     <video id="mini" autoplay playsinline muted></video>
     <div class="row" style="margin-top:10px">
+      <button id="btnToggleSel" disabled>Selezione On/Off</button>
       <button id="btnShot" disabled>Scatta</button>
       <button id="btnSaveShot" disabled>Salva scatto</button>
-      <button id="btnToggleSel" disabled>Selezione On/Off</button>
-      <button id="btnRecord" disabled>Registra</button>
-      <button id="btnStopRec" disabled>Stop</button>
     </div>
-    <div class="row" style="margin-top:10px">
-      <button id="btnSMSet" disabled>Salva completi (SM Full + SM View + PSI)</button>
-      <button id="btnSnapshot" disabled>Snapshot HTML+Headers+Assets</button>
+
+    <!-- SEMI: upload p7m/tsr -->
+    <div id="semiPanel" style="display:none;margin-top:10px" class="row">
+      <span style="color:#555">Firma/Marca (SEMI):</span>
+      <input id="p7m" type="file" accept=".p7m">
+      <input id="tsr" type="file" accept=".tsr,.m7m">
+      <button id="btnUploadSigned">Carica</button>
     </div>
   </div>
 
-  <!-- Colonna destra: grande anteprima scatto + log -->
   <div class="card">
-    <div class="title">Anteprima cattura (grande)</div>
-    <div id="bigPreview">
-      <div id="cropWrap">
-        <img id="img" alt="Anteprima scatto"/>
-        <div id="rect"></div>
-      </div>
+    <div class="title">Finestra di cattura (grande)</div>
+    <div id="big">
+      <div id="cropWrap"><img id="img" alt="Anteprima scatto"><div id="rect"></div></div>
     </div>
-
-    <!-- Pannello SEMI: upload firma/marca -->
-    <div id="semiPanel" style="display:none;margin-top:10px" class="row">
-      <span class="mut">Firma/Marca (SEMI):</span>
-      <input id="p7m" type="file" accept=".p7m">
-      <input id="tsr" type="file" accept=".tsr,.m7m">
-      <button id="btnUploadSigned">Carica .p7m/.tsr</button>
-    </div>
-
     <div class="title" style="margin-top:12px">Log in tempo reale</div>
     <div id="logLive"></div>
   </div>
 </main>
 
 <script>
-/* ======= Config querystring ======= */
-const q = new URLSearchParams(location.search);
-const APP   = q.get('app')  || '';  // URL Web App /exec
-const TOKEN = q.get('t')    || '';  // DATA!B7
-let   CURRENT = q.get('u')  || '';  // URL dichiarata
-const DEF_TO = q.get('to')  || '';
-const DEF_SJ = q.get('subj')|| '';
+/* ===== Config ===== */
+const q=new URLSearchParams(location.search);
+const APP=q.get('app')||'', TOKEN=q.get('t')||''; let CURRENT=q.get('u')||''; const DEF_TO=q.get('to')||'', DEF_SJ=q.get('subj')||'';
+const el=id=>document.getElementById(id); const mini=el('mini'), img=el('img'), rect=el('rect');
 
-/* ======= DOM refs ======= */
-const el = id=>document.getElementById(id);
-const mini = el('mini'), img = el('img'), rect = el('rect');
+/* ===== Stato ===== */
+let session={id:'',name:''}; let stream=null, recorder=null, recChunks=[];
+let selectionOn=false, lastDataUrl='', lastMeta=null, lastCrop=null; let openedWin=null;
 
-/* ======= Stato ======= */
-let session = { id:'', name:'' };
-let stream = null, recorder=null, recChunks=[];
-let lastDataUrl = '', lastMeta = null, lastCrop = null;
-let selectionOn = false;
-
-/* ======= UI helpers ======= */
-function status(s){ el('status').textContent = s; }
-function logLive(line, kind='info'){
-  const ts = new Date().toLocaleTimeString();
-  const p = document.createElement('div');
-  p.textContent = `[${ts}] ${line}`;
-  if (kind==='ok') p.style.color = '#86ffa3';
-  if (kind==='warn') p.style.color = '#ffd480';
-  if (kind==='err') p.style.color = '#ff8a8a';
-  el('logLive').appendChild(p);
-  el('logLive').scrollTop = el('logLive').scrollHeight;
+/* ===== UI ===== */
+function status(s){ el('status').textContent=s; }
+function logHtml(html){ const p=document.createElement('div'); p.innerHTML=html; el('logLive').appendChild(p); el('logLive').scrollTop=el('logLive').scrollHeight; }
+function logText(t, kind='info'){
+  const ts=new Date().toLocaleTimeString(); const color=kind==='ok'?'#86ffa3':kind==='warn'?'#ffd480':kind==='err'?'#ff8a8a':'#d0d0d0';
+  logHtml(`<span style="color:${color}">[${ts}] ${t}</span>`);
 }
-function setBusy(b){
-  document.querySelectorAll('button').forEach(btn=>{
-    if (btn.id==='btnShare') return;
-    btn.disabled = b || btn.dataset.locked==='1';
-    btn.classList.toggle('on', !btn.disabled && btn===_lastActiveBtn);
-  });
-}
-let _lastActiveBtn=null;
-function arm(btn){ _lastActiveBtn = btn; btn.classList.add('on'); }
+function setBusy(b){ document.querySelectorAll('button').forEach(btn=>{
+  if(btn.id==='btnOpenSite'||btn.id==='btnShare'){} // lasciali
+  btn.disabled = b || btn.dataset.locked==='1';
+});}
 
-/* ======= Fence: pointer events + doppio click per svuotare ======= */
-(function initFence(){
-  let dragging=false, sx=0, sy=0;
-  function bounds(e){
-    const wrap = rect.parentElement.getBoundingClientRect();
-    const x = Math.max(0, Math.min(e.clientX - wrap.left, wrap.width));
-    const y = Math.max(0, Math.min(e.clientY - wrap.top , wrap.height));
-    return {x,y};
-  }
-  rect.parentElement.addEventListener('pointerdown', e=>{
-    if (!selectionOn || !img.src) return;
-    if (e.button!==0 && e.pointerType==='mouse') return;
-    e.preventDefault();
-    dragging=true;
-    const p=bounds(e); sx=p.x; sy=p.y;
-    Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px',display:'block'});
-    const onMove = ev=>{
-      if(!dragging) return; const q=bounds(ev);
-      rect.style.left   = Math.min(q.x, sx) + 'px';
-      rect.style.top    = Math.min(q.y, sy) + 'px';
-      rect.style.width  = Math.abs(q.x - sx) + 'px';
-      rect.style.height = Math.abs(q.y - sy) + 'px';
-    };
-    const onUp = ()=>{ dragging=false; document.removeEventListener('pointermove', onMove); };
-    document.addEventListener('pointermove', onMove);
-    document.addEventListener('pointerup', onUp, {once:true});
+/* ===== Mini overlay selection ===== */
+(function(){
+  let dragging=false,sx=0,sy=0;
+  function bounds(e){ const w=rect.parentElement.getBoundingClientRect();
+    return {x:Math.max(0,Math.min(e.clientX-w.left,w.width)), y:Math.max(0,Math.min(e.clientY-w.top,w.height))}; }
+  rect.parentElement.addEventListener('pointerdown',e=>{
+    if(!selectionOn||!img.src) return; if(e.button!==0&&e.pointerType==='mouse') return;
+    e.preventDefault(); dragging=true; const p=bounds(e); sx=p.x; sy=p.y;
+    Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0',height:'0',display:'block'});
+    const onMove=ev=>{ if(!dragging) return; const q=bounds(ev);
+      rect.style.left=Math.min(q.x,sx)+'px'; rect.style.top=Math.min(q.y,sy)+'px';
+      rect.style.width=Math.abs(q.x-sx)+'px'; rect.style.height=Math.abs(q.y-sy)+'px';};
+    const onUp=()=>{ dragging=false; document.removeEventListener('pointermove',onMove); };
+    document.addEventListener('pointermove',onMove); document.addEventListener('pointerup',onUp,{once:true});
   });
-  rect.parentElement.addEventListener('dblclick', ()=>{
-    rect.style.display='none'; rect.style.width=rect.style.height='0px';
-    logLive('Selezione rimossa','warn');
-  });
+  rect.parentElement.addEventListener('dblclick',()=>{ rect.style.display='none'; rect.style.width=rect.style.height='0'; logText('Selezione rimossa','warn'); });
 })();
 
-/* ======= Networking ======= */
-async function callGET(query){
-  const url = APP + (APP.includes('?')?'&':'?') + query;
-  const res = await fetch(url, { method:'GET' });
-  if (!res.ok){ const t=await res.text().catch(()=> ''); throw new Error('HTTP '+res.status+' '+t.slice(0,160)); }
-  return await res.json();
-}
-async function callPOST(body){
-  const res = await fetch(APP, { method:'POST', headers:{'Content-Type':'text/plain; charset=utf-8'}, body: JSON.stringify(body) });
-  if (!res.ok){ const t=await res.text().catch(()=> ''); throw new Error('HTTP '+res.status+' '+t.slice(0,200)); }
-  return await res.json();
-}
+/* ===== Net ===== */
+async function callGET(qs){ const url=APP+(APP.includes('?')?'&':'?')+qs; const r=await fetch(url); if(!r.ok){throw new Error('HTTP '+r.status+' '+await r.text());} return r.json(); }
+async function callPOST(body){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(body)}); if(!r.ok){throw new Error('HTTP '+r.status+' '+await r.text());} return r.json(); }
 
-/* ======= Condivisione schermo ======= */
-el('btnShare').onclick = async ()=>{
+/* ===== Apri sito in nuova finestra ===== */
+el('btnOpenSite').onclick=()=>{
+  const addr=(el('addr').value||'').trim()||CURRENT; if(!addr){ alert('Inserisci URL'); return; }
+  CURRENT=addr;
+  openedWin = window.open(addr, '_blank', 'noopener'); // da selezionare nel popup del browser
+  logText('Aperta finestra del sito. Sceglila quando avvii la condivisione.','warn');
+};
+
+/* ===== Condivisione schermo ===== */
+el('btnShare').onclick=async ()=>{
   try{
-    arm(el('btnShare')); setBusy(true); status('Richiedo condivisione…');
-    stream = await navigator.mediaDevices.getDisplayMedia({ video:true, audio:false });
-    mini.srcObject = stream; await mini.play();
-    el('btnStartCert').disabled = false;
-    logLive('Condivisione attiva (scheda/finestra/schermo).','ok');
+    setBusy(true); status('Richiedo condivisione…');
+    stream = await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
+    mini.srcObject=stream; await mini.play();
+    el('btnStartCert').disabled=false;
+    logText('Condivisione attiva (scheda/finestra/schermo).','ok');
     status('Pronto');
-  }catch(e){ alert('Condivisione negata: '+(e.message||e)); status('Negato'); }
+  }catch(e){ alert('Condivisione negata: '+(e.message||e)); }
   finally{ setBusy(false); }
 };
 
-/* ======= Start/Finish certificazione ======= */
-el('btnStartCert').onclick = async ()=>{
-  if (!stream){ alert('Condividi schermo prima.'); return; }
+/* ===== Start ===== */
+el('btnStartCert').onclick=async ()=>{
+  if(!stream){ alert('Condividi schermo prima'); return; }
+  const cliente=(el('cliente').value||'').trim(); if(!cliente){ alert('Cliente obbligatorio'); return; }
+  const addr=(el('addr').value||'').trim()||CURRENT; if(!addr){ alert('URL obbligatoria'); return; }
+  CURRENT=addr;
   try{
-    arm(el('btnStartCert')); setBusy(true); status('Creo sessione…');
-    const cliente = (el('cliente').value||'').trim(); if(!cliente){ alert('Inserisci Cliente'); setBusy(false); return; }
-    const addr = (el('addr').value||'').trim() || CURRENT; if(!addr){ alert('Inserisci URL'); setBusy(false); return; }
-    CURRENT = addr;
-
-    const js = await callGET('mode=start'
-      + '&t='+encodeURIComponent(TOKEN)
-      + '&u='+encodeURIComponent(CURRENT)
-      + '&client='+encodeURIComponent(cliente)
-      + '&modeCert='+encodeURIComponent(el('modeCert').value)
-      + '&ua='+encodeURIComponent(navigator.userAgent||'')
-      + '&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')
-      + '&lang='+encodeURIComponent(navigator.language||'')
-      + '&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height
-      + '&dpr='+(window.devicePixelRatio||1)
-      + '&page='+encodeURIComponent(location.href||'')
+    setBusy(true); status('Creo sessione…');
+    const js=await callGET('mode=start&t='+encodeURIComponent(TOKEN)
+      +'&u='+encodeURIComponent(CURRENT)
+      +'&client='+encodeURIComponent(cliente)
+      +'&modeCert='+encodeURIComponent(el('modeCert').value)
+      +'&autoSnap='+(el('autoSnap').checked?1:0)
+      +'&autoSM='+(el('autoSM').checked?1:0)
+      +'&autoFirst='+(el('autoFirst').checked?1:0)
     );
     if(!js.ok) throw new Error(js.error||'start failed');
-    session.id = js.sessionId; session.name = js.sessionName;
-    // gating
-    el('btnStartCert').dataset.locked='1'; el('btnStartCert').disabled = true;
-    el('btnFinishCert').disabled = false;
-    ['btnShot','btnSaveShot','btnToggleSel','btnRecord','btnStopRec','btnSMSet','btnSnapshot'].forEach(id=> el(id).disabled=false);
-    // pannello SEMI
-    el('semiPanel').style.display = (el('modeCert').value==='SEMI_KEY_TSA') ? 'flex' : 'none';
-    logLive(`Sessione avviata: ${js.sessionName}`,'ok');
+    session.id=js.sessionId; session.name=js.sessionName;
+    el('btnStartCert').dataset.locked='1'; el('btnStartCert').disabled=true; el('btnFinishCert').disabled=false;
+    el('btnToggleSel').disabled=false; el('btnShot').disabled=false; // “Salva scatto” si abilita dopo uno scatto
+    el('semiPanel').style.display = (el('modeCert').value==='SEMI_KEY_TSA') ? 'flex':'none';
+    logText(`Sessione avviata: ${js.sessionName}`,'ok');
+
+    // AUTO azioni
+    if (el('autoSnap').checked) { await doSnapshotAuto(); }
+    if (el('autoSM').checked)   { await doSMPSIAuto(); }
+    if (el('autoFirst').checked){ await doFirstShotAuto(); }
+
     status('Sessione attiva');
-  }catch(e){ alert('Errore start: '+e.message); status('Errore'); }
+  }catch(e){ alert('Start errore: '+e.message); }
   finally{ setBusy(false); }
 };
 
-el('btnFinishCert').onclick = async ()=>{
-  if (!session.id){ alert('Nessuna sessione attiva'); return; }
-  if (!confirm('Sei sicuro di TERMINARE la certificazione? (Dopo questa azione tutto verrà impacchettato)')) return;
+async function doSnapshotAuto(){
   try{
-    arm(el('btnFinishCert')); setBusy(true); status('Creo ZIP e invio PEC (se previsto)…');
-    const js = await callGET('mode=finish'
-      + '&t='+encodeURIComponent(TOKEN)
-      + '&id='+encodeURIComponent(session.id)
-      + '&modeCert='+encodeURIComponent(el('modeCert').value)
-      + (el('rcpts').value ? '&to='+encodeURIComponent(el('rcpts').value) : '')
-    );
-    if(!js.ok) throw new Error(js.error||'finish failed');
-    logLive(`Termine: ZIP pronto (SHA=${js.zipSha256})`, 'ok');
-    alert('Sessione terminata.\nZIP: ' + js.zipUrl + '\nSHA-256: ' + js.zipSha256);
-    // blocca tutto
-    document.querySelectorAll('button').forEach(b=> b.disabled=true);
-    status('Completato');
-  }catch(e){ alert('Errore finish: '+e.message); status('Errore'); setBusy(false); }
-};
-
-/* ======= Scatto / Salvataggio ======= */
-async function grabFrame(full){
-  if (!stream) throw new Error('Condivisione non attiva');
-  const trackSettings = stream.getVideoTracks()[0].getSettings?.() || {};
-  const vw = mini.videoWidth || trackSettings.width || 1920;
-  const vh = mini.videoHeight|| trackSettings.height|| 1080;
-  const c = document.createElement('canvas'); c.width=vw; c.height=vh;
-  c.getContext('2d').drawImage(mini, 0, 0, vw, vh);
-  const fullUrl = c.toDataURL('image/png');
-
-  if (full || rect.style.display==='none' || !parseFloat(rect.style.width)) {
-    lastCrop = {x:0,y:0,w:vw,h:vh,naturalW:vw,naturalH:vh};
-    return fullUrl;
-  }
-  // crop da rect su img (mappa proporzioni rispetto a bigPreview)
-  const wrap = rect.parentElement.getBoundingClientRect();
-  const dispW = wrap.width, dispH = wrap.height;
-  const scaleX = vw / dispW, scaleY = vh / dispH;
-  const rx = Math.round(parseFloat(rect.style.left) * scaleX);
-  const ry = Math.round(parseFloat(rect.style.top)  * scaleY);
-  const rw = Math.round(parseFloat(rect.style.width)* scaleX);
-  const rh = Math.round(parseFloat(rect.style.height)* scaleY);
-  const cc = document.createElement('canvas'); cc.width = Math.max(1,rw); cc.height=Math.max(1,rh);
-  cc.getContext('2d').drawImage(c, rx, ry, rw, rh, 0, 0, cc.width, cc.height);
-  lastCrop = {x:rx,y:ry,w:cc.width,h:cc.height,naturalW:vw,naturalH:vh};
-  return cc.toDataURL('image/png');
+    setBusy(true); status('Snapshot automatico…');
+    const js=await callGET('mode=snapshot&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(session.id)+'&u='+encodeURIComponent(CURRENT));
+    if(!js.ok) throw new Error(js.error||'snapshot failed');
+    logText(`Snapshot creato (assets=${js.assets}) — <a href="${js.folderUrl}" target="_blank" rel="noopener">apri cartella</a>`,'ok');
+  }catch(e){ logText('Snapshot auto: '+e.message,'err'); } finally{ setBusy(false); status('Pronto'); }
+}
+async function doSMPSIAuto(){
+  try{
+    setBusy(true); status('SM/PSI automatico…');
+    // SM FULL
+    let js=await callGET('mode=sm&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(CURRENT)+'&dim=1920xfull');
+    await callPOST({authToken:TOKEN,sid:session.id,fileNameHint:`SM_FULL_1920xfull_${Date.now()}.png`,dataUrl:js.dataUrl,meta:{url:CURRENT,finalUrl:CURRENT,sourceMeta:js.meta}});
+    logText('SM FULL salvato','ok');
+    // SM VIEW
+    js=await callGET('mode=sm&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(CURRENT)+'&dim=1920x1080');
+    await callPOST({authToken:TOKEN,sid:session.id,fileNameHint:`SM_VIEW_1920x1080_${Date.now()}.png`,dataUrl:js.dataUrl,meta:{url:CURRENT,finalUrl:CURRENT,sourceMeta:js.meta}});
+    logText('SM VIEW salvato','ok');
+    // PSI
+    try{
+      js=await callGET('mode=psi&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(CURRENT));
+      await callPOST({authToken:TOKEN,sid:session.id,fileNameHint:`PSI_${Date.now()}.png`,dataUrl:js.dataUrl,meta:{url:CURRENT,finalUrl:CURRENT,sourceMeta:js.meta}});
+      logText('PSI salvato','ok');
+    }catch(e){ logText('PSI non disponibile: '+e.message,'warn'); }
+  }catch(e){ logText('SM/PSI auto: '+e.message,'err'); } finally{ setBusy(false); status('Pronto'); }
+}
+async function doFirstShotAuto(){
+  try{
+    setBusy(true); status('Primo scatto automatico…');
+    const d = await grabFrame(false);
+    img.src=d; lastDataUrl=d; lastMeta={provider:'screen-capture',label:'FRAME_FULL',dimension:''};
+    const js=await callPOST({authToken:TOKEN,sid:session.id,fileNameHint:`FRAME_FULL_${Date.now()}.png`,dataUrl:lastDataUrl,meta:{url:CURRENT,finalUrl:CURRENT,sourceMeta:lastMeta,crop:lastCrop}});
+    logText(`Primo scatto salvato — <a href="${js.url}" target="_blank" rel="noopener">${js.name}</a> (SHA ${js.sha256.slice(0,12)}…)`,'ok');
+  }catch(e){ logText('Primo scatto auto: '+e.message,'err'); } finally{ setBusy(false); status('Pronto'); }
 }
 
-el('btnToggleSel').onclick = ()=>{
-  selectionOn = !selectionOn;
-  el('btnToggleSel').classList.toggle('on', selectionOn);
-  logLive('Selezione '+(selectionOn?'attiva':'spenta'), selectionOn?'warn':'info');
-};
-
-el('btnShot').onclick = async ()=>{
+/* ===== Finish ===== */
+el('btnFinishCert').onclick=async ()=>{
+  if(!session.id){ alert('Nessuna sessione attiva'); return; }
+  if(!confirm('Sei sicuro di TERMINARE la certificazione?')) return;
   try{
-    arm(el('btnShot')); setBusy(true); status('Scatto…');
-    const d = await grabFrame(false);
-    img.src = d; lastDataUrl = d;
-    lastMeta = { provider:'screen-capture', label: (selectionOn && rect.style.display!=='none') ? 'FENCE' : 'FRAME_FULL',
-                 dimension:'' };
-    logLive('Frame acquisito (in memoria).','ok');
-    el('btnSaveShot').disabled = false;
-    status('Pronto');
-  }catch(e){ alert('Errore scatto: '+e.message); status('Errore'); }
-  finally{ setBusy(false); }
+    setBusy(true); status('Creo ZIP e PEC…');
+    const js=await callGET('mode=finish&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(session.id)
+      +(el('rcpts').value?('&to='+encodeURIComponent(el('rcpts').value)):'')
+    );
+    if(!js.ok) throw new Error(js.error||'finish failed');
+    logHtml(`ZIP pronto — <a href="${js.zipUrl}" target="_blank" rel="noopener">apri</a> (SHA ${js.zipSha256})`);
+    alert('Sessione terminata.\nZIP: '+js.zipUrl+'\nSHA-256: '+js.zipSha256);
+    document.querySelectorAll('button').forEach(b=>b.disabled=true);
+    status('Completato');
+  }catch(e){ alert('Finish errore: '+e.message); setBusy(false); }
 };
 
-el('btnSaveShot').onclick = async ()=>{
-  if (!lastDataUrl){ alert('Nessuno scatto in memoria'); return; }
-  try{
-    arm(el('btnSaveShot')); setBusy(true); status('Salvo scatto…');
-    const js = await callPOST({
-      authToken:TOKEN, sid: session.id,
-      fileNameHint: `${lastMeta?.label||'FRAME'}_${Date.now()}.png`,
-      dataUrl: lastDataUrl,
-      meta: { url: CURRENT, finalUrl: CURRENT, canonical:'', sourceMeta:lastMeta, crop:lastCrop }
-    });
-    if(!js.ok) throw new Error(js.error||'save failed');
-    logLive('Scatto salvato: '+js.name+' (SHA '+js.sha256.slice(0,12)+'…)','ok');
-    status('Pronto');
-  }catch(e){ alert('Salvataggio fallito: '+e.message); status('Errore'); }
-  finally{ setBusy(false); }
+/* ===== Scatti manuali ===== */
+el('btnToggleSel').onclick=()=>{ selectionOn=!selectionOn; el('btnToggleSel').classList.toggle('on',selectionOn); logText('Selezione '+(selectionOn?'attiva':'spenta'),'warn'); };
+async function grabFrame(full){
+  if(!stream) throw new Error('Condivisione non attiva');
+  const vw=mini.videoWidth||1920, vh=mini.videoHeight||1080;
+  const c=document.createElement('canvas'); c.width=vw; c.height=vh; c.getContext('2d').drawImage(mini,0,0,vw,vh);
+  const fullUrl=c.toDataURL('image/png');
+  if(full || rect.style.display==='none' || !parseFloat(rect.style.width)){ lastCrop={x:0,y:0,w:vw,h:vh,naturalW:vw,naturalH:vh}; return fullUrl; }
+  const wrap=rect.parentElement.getBoundingClientRect(); const scaleX=vw/wrap.width, scaleY=vh/wrap.height;
+  const rx=Math.round(parseFloat(rect.style.left)*scaleX), ry=Math.round(parseFloat(rect.style.top)*scaleY);
+  const rw=Math.round(parseFloat(rect.style.width)*scaleX), rh=Math.round(parseFloat(rect.style.height)*scaleY);
+  const cc=document.createElement('canvas'); cc.width=Math.max(1,rw); cc.height=Math.max(1,rh);
+  cc.getContext('2d').drawImage(c,rx,ry,rw,rh,0,0,cc.width,cc.height); lastCrop={x:rx,y:ry,w:cc.width,h:cc.height,naturalW:vw,naturalH:vh};
+  return cc.toDataURL('image/png');
+}
+el('btnShot').onclick=async ()=>{
+  try{ setBusy(true); status('Scatto…');
+    const d=await grabFrame(false); img.src=d; lastDataUrl=d; lastMeta={provider:'screen-capture',label:(selectionOn&&rect.style.display!=='none')?'FENCE':'FRAME_FULL',dimension:''};
+    el('btnSaveShot').disabled=false; logText('Frame acquisito (in memoria).','ok');
+  }catch(e){ alert('Errore scatto: '+e.message); } finally{ setBusy(false); status('Pronto'); }
+};
+el('btnSaveShot').onclick=async ()=>{
+  if(!lastDataUrl){ alert('Nessuno scatto'); return; }
+  try{ setBusy(true); status('Salvo scatto…');
+    const js=await callPOST({authToken:TOKEN,sid:session.id,fileNameHint:`${lastMeta?.label||'FRAME'}_${Date.now()}.png`,dataUrl:lastDataUrl,meta:{url:CURRENT,finalUrl:CURRENT,sourceMeta:lastMeta,crop:lastCrop}});
+    logHtml(`Scatto salvato — <a href="${js.url}" target="_blank" rel="noopener">${js.name}</a> (SHA ${js.sha256.slice(0,12)}…)`); 
+  }catch(e){ alert('Salvataggio fallito: '+e.message); } finally{ setBusy(false); status('Pronto'); }
 };
 
-/* ======= Registrazione video ======= */
-el('btnRecord').onclick = ()=>{
-  if (!stream){ alert('Condivisione non attiva'); return; }
-  try{
-    arm(el('btnRecord')); setBusy(true); status('REC…');
-    recChunks=[];
-    recorder = new MediaRecorder(stream, {mimeType:'video/webm;codecs=vp9'});
-    recorder.ondataavailable = e => { if(e.data && e.data.size) recChunks.push(e.data); };
-    recorder.onstop = async ()=>{
-      const blob = new Blob(recChunks, {type:'video/webm'});
-      const b64 = await new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(blob); });
-      lastDataUrl = String(b64);
-      lastMeta = { provider:'screen-record', label:'RECORDING', dimension:'' };
-      logLive('Video pronto (in memoria). Premi “Salva scatto”.','ok');
-      el('btnSaveShot').disabled = false;
-      setBusy(false); status('Pronto');
-    };
-    recorder.start();
-    el('btnStopRec').disabled = false;
-  }catch(e){ alert('REC errore: '+e.message); setBusy(false); }
-};
-el('btnStopRec').onclick = ()=>{ try{ recorder?.stop(); }catch(_){ } el('btnStopRec').disabled=true; };
-
-/* ======= SM set (FULL+VIEW) + PSI in un click ======= */
-el('btnSMSet').onclick = async ()=>{
-  if (!session.id){ alert('Avvia certificazione'); return; }
-  const u = (el('addr').value||CURRENT||'').trim(); if(!u){ alert('URL mancante'); return; }
-  try{
-    arm(el('btnSMSet')); setBusy(true); status('SM/PSI…');
-    // SM FULL (1920xfull)
-    logLive('SM FULL 1920xfull…');
-    let js = await callGET('mode=sm&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)+'&dim='+encodeURIComponent('1920xfull'));
-    if(!js.ok) throw new Error(js.error||'SM full failed');
-    await callPOST({ authToken:TOKEN, sid:session.id, fileNameHint:`SM_FULL_1920xfull_${Date.now()}.png`,
-      dataUrl: js.dataUrl, meta:{ url:u, finalUrl:u, sourceMeta:js.meta } });
-    logLive('SM FULL salvato.','ok');
-
-    // SM VIEW (1920x1080)
-    logLive('SM VIEW 1920x1080…');
-    js = await callGET('mode=sm&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)+'&dim='+encodeURIComponent('1920x1080'));
-    if(!js.ok) throw new Error(js.error||'SM view failed');
-    await callPOST({ authToken:TOKEN, sid:session.id, fileNameHint:`SM_VIEW_1920x1080_${Date.now()}.png`,
-      dataUrl: js.dataUrl, meta:{ url:u, finalUrl:u, sourceMeta:js.meta } });
-    logLive('SM VIEW salvato.','ok');
-
-    // PSI
-    logLive('PSI…');
-    js = await callGET('mode=psi&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u));
-    if(!js.ok) throw new Error(js.error||'PSI failed');
-    await callPOST({ authToken:TOKEN, sid:session.id, fileNameHint:`PSI_${Date.now()}.png`,
-      dataUrl: js.dataUrl, meta:{ url:u, finalUrl:u, sourceMeta:js.meta } });
-    logLive('PSI salvato.','ok');
-
-    status('Pronto');
-  }catch(e){ alert('SM/PSI errore: '+e.message); status('Errore'); }
-  finally{ setBusy(false); }
-};
-
-/* ======= Snapshot pagina ======= */
-el('btnSnapshot').onclick = async ()=>{
-  if(!session.id){ alert('Avvia certificazione'); return; }
-  const u = (el('addr').value||CURRENT||'').trim(); if(!u){ alert('URL mancante'); return; }
-  try{
-    arm(el('btnSnapshot')); setBusy(true); status('Snapshot…');
-    const js = await callGET('mode=snapshot&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(session.id)+'&u='+encodeURIComponent(u));
-    if(!js.ok) throw new Error(js.error||'snapshot failed');
-    logLive(`Snapshot salvato (assets=${js.assets}).`,'ok');
-    status('Pronto');
-  }catch(e){ alert('Snapshot errore: '+e.message); status('Errore'); }
-  finally{ setBusy(false); }
-};
-
-/* ======= Upload firma/marca (SEMI) ======= */
-el('btnUploadSigned').onclick = async ()=>{
+/* ===== Upload firmati (SEMI) ===== */
+el('btnUploadSigned').onclick=async ()=>{
   if (el('modeCert').value!=='SEMI_KEY_TSA'){ alert('Modalità non SEMI'); return; }
   if (!session.id){ alert('Avvia certificazione'); return; }
-  const p7m = el('p7m').files[0], tsr = el('tsr').files[0];
-  if (!p7m && !tsr){ alert('Seleziona almeno .p7m'); return; }
-
-  async function fileToDataUrl(f){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(f); }); }
-  const files = [];
-  if (p7m) files.push({name:p7m.name, dataUrl: await fileToDataUrl(p7m)});
-  if (tsr) files.push({name:tsr.name, dataUrl: await fileToDataUrl(tsr)});
-
-  try{
-    arm(el('btnUploadSigned')); setBusy(true); status('Carico firma/marca…');
-    const js = await callPOST({ authToken:TOKEN, action:'uploadSigned', sid:session.id, files });
-    if(!js.ok) throw new Error(js.error||'upload failed');
-    logLive('Caricati file firmati/marca: '+js.saved.map(x=>x.name).join(', '),'ok');
-    status('Pronto');
-  }catch(e){ alert('Upload fallito: '+e.message); status('Errore'); }
-  finally{ setBusy(false); }
+  const p7m=el('p7m').files[0], tsr=el('tsr').files[0]; if(!p7m&&!tsr){ alert('Seleziona almeno .p7m'); return; }
+  const toDataUrl=f=>new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(f); });
+  const files=[]; if(p7m) files.push({name:p7m.name,dataUrl:await toDataUrl(p7m)}); if(tsr) files.push({name:tsr.name,dataUrl:await toDataUrl(tsr)});
+  try{ setBusy(true); status('Carico…'); const js=await callPOST({authToken:TOKEN,action:'uploadSigned',sid:session.id,files});
+    if(!js.ok) throw new Error(js.error||'upload failed'); logText('Caricati: '+js.saved.map(x=>x.name).join(', '),'ok');
+  }catch(e){ alert('Upload fallito: '+e.message); } finally{ setBusy(false); status('Pronto'); }
 };
 
-/* ======= Boot ======= */
-window.addEventListener('load', ()=>{
-  el('addr').value = CURRENT || '';
-  el('rcpts').value = DEF_TO || '';
-  el('subj').value = DEF_SJ || 'Web Evidence – Bundle';
-  // finché non c’è sessione, i controlli restano disabilitati
+/* ===== Boot ===== */
+window.addEventListener('load',()=>{
+  el('addr').value=CURRENT||''; el('rcpts').value=DEF_TO||''; el('subj').value=DEF_SJ||'Web Evidence – Bundle';
 });
 </script>
 </body>
