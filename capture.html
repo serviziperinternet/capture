@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v15.2</title>
+<title>Web Evidence – v15.2.1</title>
 <style>
   :root{--bd:#ddd;--ok:#18a957;--danger:#e11d48}
   *{box-sizing:border-box}
@@ -107,7 +107,6 @@ function logLine(s, important=false){
   L.textContent = entry + '\n' + L.textContent; L.scrollTop=0;
 }
 function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
-function sleep(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
 /* ===== query/config ===== */
 const qs=new URLSearchParams(location.search);
@@ -127,7 +126,7 @@ const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWr
 async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); return r.json(); }
 async function POST(b){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(b)}); return r.json(); }
 
-/* ===== busy guard + stati UI ===== */
+/* ===== busy guard (con opzione restore=false) ===== */
 let BUSY=false, PREV_STATE=null;
 function snapshotUIState(){
   return {
@@ -138,14 +137,14 @@ function snapshotUIState(){
   };
 }
 function setUIState(state){
-  // state: idle | started | shared | locked | finished
   if(state==='idle'){
     enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false);
     $('btnOpen').style.display='none'; $('btnShare').style.display='none';
   }
   if(state==='started'){
+    // SOLO Apri visibile/attivo; Condividi nascosto finché non si apre
     $('btnOpen').style.display='inline-block'; enable($('btnOpen'), true);
-    $('btnShare').style.display='inline-block'; enable($('btnShare'), false);
+    $('btnShare').style.display='none';
     enable($('btnFull'), true); enable($('btnAssets'), true);
     enable($('btnSnap'), false); enable($('btnSave'), false);
   }
@@ -161,25 +160,24 @@ function setUIState(state){
     document.querySelectorAll('button').forEach(b=> b.disabled=true);
   }
 }
-async function withBusy(label, fn){
+async function withBusy(label, fn, opts){
+  const restore = !(opts && opts.restore===false);
   if(BUSY){ logLine('ATTESA PER: '+BUSY); return; }
   BUSY=label; PREV_STATE=snapshotUIState();
-  // disabilita tutto
   document.querySelectorAll('button').forEach(b=> b.disabled=true);
   logLine('ATTESA PER: '+label, true);
   try{ const res=await fn(); logLine('PRONTO: '+label, true); return res; }
   catch(e){ logLine('ERRORE in '+label+': '+(e.message||e), true); }
   finally{
     BUSY=false;
-    // ripristina
-    if($('btnFinish').style.display==='inline-block') $('btnFinish').disabled=false;
-    if(PREV_STATE){
+    if(restore && PREV_STATE){
       enable($('btnFull'), !!PREV_STATE.full);
       enable($('btnAssets'), !!PREV_STATE.assets);
       enable($('btnSnap'), !!PREV_STATE.snap);
       enable($('btnSave'), !!PREV_STATE.save);
       if($('btnOpen').style.display!=='none') $('btnOpen').disabled=!PREV_STATE.open;
       if($('btnShare').style.display!=='none') $('btnShare').disabled=!PREV_STATE.share;
+      if($('btnFinish').style.display!=='none') $('btnFinish').disabled=!PREV_STATE.finish;
     }
   }
 }
@@ -194,7 +192,7 @@ function drawPreview(){
   ctx.drawImage(video, dx, dy, dw, dh);
   rafId=requestAnimationFrame(drawPreview);
 }
-(function(){ if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview); })();
+(function(){ if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview); setUIState('idle'); })();
 
 /* ===== START ===== */
 $('btnStart').onclick = async ()=>{
@@ -203,7 +201,7 @@ $('btnStart').onclick = async ()=>{
   if(!cli){ alert('Cliente obbligatorio'); return; }
   if(!url){ alert('URL obbligatoria'); return; }
 
-  // blocca SUBITO (anti-manomissione)
+  // blocco immediato anti-manomissione
   $('btnStart').style.opacity=.5; $('btnStart').disabled=true;
   addr.readOnly=true; addr.disabled=true; client.readOnly=true; client.disabled=true;
   logLine('Avvio certificazione…');
@@ -229,11 +227,11 @@ $('btnStart').onclick = async ()=>{
     logLine('SESSIONE: '+js.base+(js.folderUrl?(' → '+js.folderUrl):''), true);
     if(js.trace) js.trace.forEach(t=>logLine(t));
 
-    // swap start→finish e abilita comandi
+    // Start → Finish + stato avviato
     $('btnStart').style.display='none';
     $('btnFinish').style.display='inline-block'; $('btnFinish').disabled=false;
     setUIState('started');
-  });
+  }, {restore:false}); // <— NON ripristinare lo stato precedente
 };
 
 /* ===== Apri / Condividi ===== */
@@ -242,6 +240,7 @@ $('btnOpen').onclick = ()=>{
   window.open(url, '_we_clean_'+Date.now(), 'noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no');
   logLine('Finestra/pagina aperta.');
   $('btnOpen').style.display='none';
+  $('btnShare').style.display='inline-block';
   enable($('btnShare'), true);
 };
 $('btnShare').onclick = async ()=>{
