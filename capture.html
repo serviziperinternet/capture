@@ -3,110 +3,111 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v14.9</title>
+<title>Web Evidence – v15.0</title>
 <style>
-  :root{--bd:#ddd;--accent:#0b5cff}
+  :root{--bd:#ddd;--accent:#0b5cff;--ok:#18a957;--danger:#e11d48}
   *{box-sizing:border-box}
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0;color:#111;background:#fff}
 
-  header{
-    display:grid;grid-template-columns:170px 1fr auto auto 260px 1fr auto;
-    gap:8px;align-items:center;border-bottom:1px solid #eee;padding:10px
-  }
+  header{padding:10px;border-bottom:1px solid #eee}
+  .hrow{display:grid;gap:8px;align-items:center}
+  .row1{grid-template-columns:170px 1fr auto}
+  .row2{grid-template-columns:auto auto 220px 1fr}
   input,button,select{padding:8px;border:1px solid var(--bd);border-radius:10px;background:#fafafa}
   input[type="url"], input[type="text"]{background:#fff}
   button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  .success{background:var(--ok)!important;border-color:var(--ok)!important;color:#fff}
+  .danger{background:var(--danger)!important;border-color:var(--danger)!important;color:#fff}
   button[disabled]{opacity:.55;cursor:not-allowed}
-  #state{justify-self:end;font-size:12px;color:#222;background:#f3f4f6;border-radius:999px;padding:.25rem .6rem}
+  #state{margin-left:10px;font-size:12px;color:#222;background:#f3f4f6;border-radius:999px;padding:.25rem .6rem}
 
-  .wrap{display:grid;grid-template-columns:320px 1fr 360px;gap:12px;padding:12px}
+  /* layout 2 colonne: sinistra anteprima 320px, destra tutto il resto */
+  .wrap{display:grid;grid-template-columns:320px 1fr;gap:12px;padding:12px}
   .card{border:1px solid #eee;border-radius:12px;background:#fff}
   .card h3{margin:0;padding:10px 12px;border-bottom:1px solid #f3f4f4;font-size:13px;font-weight:700}
 
+  /* ANTEPRIMA */
   .side{padding:12px}
   #thumb{width:300px;height:300px;display:block;background:#000;border:1px dashed #ccc;border-radius:10px}
+  .mut{color:#666}
 
+  /* DESTRA: controlli + log (fisso) + cattura grande */
   .controls{display:flex;flex-direction:column;gap:10px;padding:12px}
-  .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+  .controls .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .dim{opacity:.6}
 
-  .capture{grid-column:2}
-  .cap-wrap{position:relative;padding:12px;overflow:auto}
+  #logWrap{padding:0 12px 12px}
+  #logBox{height:190px;border:1px solid #eee;border-radius:10px;padding:10px;overflow:auto;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;background:#fafafa;white-space:pre-wrap}
+
+  .capCard{grid-column:2}
+  .cap-wrap{position:relative;padding:12px;overflow:auto;border-top:1px solid #f3f4f6}
   #imgLarge{max-width:100%;display:none;border-radius:12px;border:1px solid #eee;background:#000}
   #imgLarge.hasSrc{display:block}
   #rect{position:absolute;border:2px dashed #fff;display:none;pointer-events:none}
-
-  .logcol{grid-column:3; display:flex; flex-direction:column; gap:10px}
-  #log{border:1px solid #eee;border-radius:10px;padding:8px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;background:#fafafa;white-space:pre-wrap}
-
-  .mut{color:#666}
 </style>
 </head>
 <body>
 
-<header id="topbar">
-  <input id="client" placeholder="Cliente…" />
-  <input id="addr" type="url" placeholder="https://…" />
-
-  <!-- Start (blu), poi al suo posto comparirà Termina -->
-  <button id="btnStart" class="primary" type="button">Inizia certificazione</button>
-
-  <!-- Apri e Condividi -->
-  <button id="btnOpen" type="button" disabled class="dim">Apri sito in finestra</button>
-  <button id="btnShare" type="button" disabled class="dim">Condividi</button>
-
-  <input id="rcpts" placeholder="Destinatari PEC/email" />
-  <input id="subj" value="Web Evidence – Pacchetto prove" />
-  <select id="pecMode" title="Modalità invio PEC">
-    <option value="normal" selected>PEC normale</option>
-    <option value="key">PEC via KEY</option>
-    <option value="auto">PEC auto</option>
-  </select>
-
-  <button id="btnFinish" type="button" style="display:none">Termina</button>
-
-  <span id="state">Pronto</span>
+<header>
+  <!-- Riga 1: client, url, Start/Termina a destra -->
+  <div class="hrow row1">
+    <input id="client" placeholder="Cliente…" />
+    <input id="addr" type="url" placeholder="https://…" />
+    <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end">
+      <button id="btnStart" class="success" type="button">Inizia certificazione</button>
+      <button id="btnFinish" class="danger" type="button" style="display:none">Termina certificazione</button>
+      <span id="state">Pronto</span>
+    </div>
+  </div>
+  <!-- Riga 2: Apri / Condividi (appaiono dopo start), select PEC + email sotto -->
+  <div class="hrow row2" style="margin-top:8px">
+    <button id="btnOpen" type="button" disabled class="dim" style="display:none">Apri sito in finestra</button>
+    <button id="btnShare" type="button" disabled class="dim" style="display:none">Condividi</button>
+    <select id="pecMode" title="Modalità invio PEC">
+      <option value="normal" selected>PEC normale</option>
+      <option value="key">PEC via KEY</option>
+      <option value="auto">PEC auto</option>
+    </select>
+    <input id="rcpts" placeholder="Destinatari PEC/email (virgola per più indirizzi)" />
+  </div>
 </header>
 
 <div class="wrap">
-  <!-- Colonna sinistra: ANTEPRIMA 300×300 -->
+  <!-- COLONNA SINISTRA: ANTEPRIMA -->
   <div class="card side" style="grid-column:1">
     <h3>Anteprima LIVE (300×300)</h3>
     <canvas id="thumb" width="300" height="300" aria-label="Anteprima"></canvas>
     <div class="mut" style="margin-top:8px">1) Inizia → 2) Apri → 3) Condividi</div>
   </div>
 
-  <!-- Colonna centrale: CONTROLLI -->
+  <!-- COLONNA DESTRA: CONTROLLI + LOG -->
   <div class="card" style="grid-column:2">
     <h3>Controlli</h3>
     <div class="controls" id="controlsBox">
-      <!-- SOPRA -->
+      <!-- riga comandi alti -->
       <div class="row">
-        <button id="btnFull" type="button" disabled class="dim">Screenshot cattura completa</button>
+        <button id="btnFull" type="button" disabled class="dim">Cattura full page</button>
         <button id="btnAssets" type="button" disabled class="dim">Scarica asset</button>
       </div>
-      <!-- SOTTO -->
+      <!-- riga scatto -->
       <div class="row">
         <button id="btnSnap" type="button" disabled class="dim">Scatta</button>
         <button id="btnSave" type="button" disabled class="dim">Salva</button>
       </div>
     </div>
+    <!-- LOG SOTTO I PULSANTI (fisso, scroll, ultime righe in alto) -->
+    <div id="logWrap">
+      <h3 style="border:none;padding:6px 0 6px 0;margin:0">Log</h3>
+      <div id="logBox"></div>
+    </div>
   </div>
 
-  <!-- Finestra di cattura -->
-  <div class="card capture">
+  <!-- SOTTO: finestra di cattura grande -->
+  <div class="card capCard">
     <h3>Finestra di cattura (scatto)</h3>
     <div class="cap-wrap" id="capWrap">
       <img id="imgLarge" alt="Scatto"/>
       <div id="rect"></div>
-    </div>
-  </div>
-
-  <!-- Log -->
-  <div class="logcol">
-    <div class="card">
-      <h3>Log</h3>
-      <div id="log"></div>
     </div>
   </div>
 </div>
@@ -121,69 +122,64 @@ if(qs.get('dom')) client.dataset.domain=qs.get('dom');
 if(qs.get('domain')) client.dataset.domain=qs.get('domain');
 if(qs.get('to')) rcpts.value=qs.get('to');
 if(qs.get('email')) rcpts.value=qs.get('email');
-if(qs.get('subj')) subj.value=qs.get('subj');
-if(qs.get('pecMode')) document.getElementById('pecMode').value=qs.get('pecMode');
+if(qs.get('subj')) window._SUBJ_DEFAULT = qs.get('subj');
 
 /* ===== Stato ===== */
-let SID=''; let stream=null; let rafId=null; let hasShot=false;
+let SID=''; let stream=null; let rafId=null; let hasShot=false; let lockedShare=false; let canonicalUrl='';
 
 const $ = id => document.getElementById(id);
 const video = document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
 const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWrap');
 
-/* ===== Altezze dinamiche: cattura + log partono sotto i pulsanti ===== */
-function setHeights(){
-  const headerH = $('topbar').getBoundingClientRect().height;
-  const controlsH = $('controlsBox').getBoundingClientRect().height;
-  const avail = Math.max(360, window.innerHeight - headerH - controlsH - 48);
-  capWrap.style.height = avail + 'px';
-  $('log').style.height = avail + 'px';
-}
-setHeights(); window.addEventListener('resize', setHeights);
-
 /* ===== Helpers ===== */
 const setState = s => $('state').textContent=s;
-function setActive(el, active){ if(active){ el.classList.add('primary'); }else{ el.classList.remove('primary'); } }
-function enable(el, on){ el.disabled=!on; el.classList.toggle('dim', !on); }
-const log = s => { const L=$('log'); L.textContent+=(L.textContent?'\\n':'')+'['+(new Date().toLocaleTimeString())+'] '+s; L.scrollTop=L.scrollHeight; setState(s); };
+// log: riga più recente IN ALTO; blankline quando important=true
+function logLine(s, important=false){
+  const L=$('logBox');
+  const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':'');
+  L.textContent = entry + '\n' + L.textContent; // prepend
+  L.scrollTop = 0; setState(s);
+}
 async function note(type, data={}){ if(!SID) return; const q='mode=note&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+'&msg='+encodeURIComponent(type+' '+JSON.stringify(data)); try{ await fetch(APP+(APP.includes('?')?'&':'?')+q); }catch(_){}}; 
 function hasStream(){ return !!(video.srcObject && video.getVideoTracks().length && video.videoWidth); }
 function parseHost(u){ try{ return new URL(u).hostname.replace(/^www\\./,''); }catch(e){ const a=document.createElement('a'); a.href=u; return (a.hostname||'').replace(/^www\\./,''); } }
-
 async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); return r.json(); }
 async function POST(body){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(body)}); return r.json(); }
 
-/* ===== Config dal server (DATA sheet) ===== */
+/* ===== Config dal server (DATA) ===== */
 (async function loadCfg(){
   try{
     const cfg = await GET('mode=cfg');
     if(cfg.ok){
       if(!TOKEN && cfg.token) TOKEN = cfg.token;
+      if(!window._SUBJ_DEFAULT && cfg.defaultSubj) window._SUBJ_DEFAULT = cfg.defaultSubj;
       if(!rcpts.value && cfg.defaultTo) rcpts.value = cfg.defaultTo;
-      if(!subj.value && cfg.defaultSubj) subj.value = cfg.defaultSubj;
       if(!client.dataset.domain && cfg.defaultDomain) client.dataset.domain = cfg.defaultDomain;
-      log('Configurazione letta dal foglio DATA.');
+      logLine('Configurazione letta dal foglio DATA.');
     }
   }catch(_){}
 })();
 
-/* ===== Anteprima ===== */
+/* ===== Anteprima (300x300) ===== */
 function drawPreview(){
+  const ctx=thumb.getContext('2d'); const tw=thumb.width, th=thumb.height;
+  ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th);
   if(!hasStream()){ rafId=requestAnimationFrame(drawPreview); return; }
-  const ctx=thumb.getContext('2d'); const tw=thumb.width, th=thumb.height; const vw=video.videoWidth, vh=video.videoHeight; if(!vw||!vh){ rafId=requestAnimationFrame(drawPreview); return; }
-  ctx.clearRect(0,0,tw,th);
+  const vw=video.videoWidth, vh=video.videoHeight; if(!vw||!vh){ rafId=requestAnimationFrame(drawPreview); return; }
   const br=vw/vh; let dw=tw, dh=tw/br; if(dh>th){ dh=th; dw=th*br; } const dx=(tw-dw)/2, dy=(th-dh)/2;
   ctx.drawImage(video, dx, dy, dw, dh);
   rafId=requestAnimationFrame(drawPreview);
 }
 
-/* ===== START PRIMA DI TUTTO ===== */
+/* ===== START (verde fisso, poi diventa “Termina” rosso) ===== */
 $('btnStart').onclick = async ()=>{
   const cli=client.value.trim(), u=(addr.value||'').trim();
   if(!cli){ alert('Cliente obbligatorio'); return; }
   if(!u){ alert('URL obbligatoria'); return; }
+  canonicalUrl = u.trim();
   let domOverride = client.dataset.domain||parseHost(u);
-  setState('Creo sessione…'); setActive($('btnStart'), true);
+
+  setState('Creo sessione…');
   const js=await GET(
     'mode=start'
     +'&t='+encodeURIComponent(TOKEN||'')
@@ -196,89 +192,112 @@ $('btnStart').onclick = async ()=>{
     +'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)
     +'&page='+encodeURIComponent(location.href||'')
   );
-  if(!js.ok){ alert(js.error||'Errore avvio'); setState('Errore'); setActive($('btnStart'), false); return; }
+  if(!js.ok){ alert(js.error||'Errore avvio'); setState('Errore'); return; }
   SID=js.sessionId;
-  log('Sessione: '+js.base+(js.folderUrl?('  →  '+js.folderUrl):''));
-  if(js.trace && js.trace.length){ js.trace.forEach(line => log(line)); } // LOG DETTAGLIATI DAL SERVER
-  setState('Pronto'); note('SESSION_START',{base:js.base});
+  logLine('SESSIONE: '+js.base+(js.folderUrl?(' → '+js.folderUrl):''), true);
+  if(js.trace && js.trace.length){ js.trace.forEach(line => logLine(line)); }
 
-  // Abilita Apri, poi Condividi
-  enable($('btnOpen'), true); setActive($('btnStart'), false);
-  // Sostituisci Start con Termina (stessa posizione)
+  // blinda i campi di input
+  addr.readOnly=true; client.readOnly=true;
+
+  // mostra “Apri” e “Condividi” (in quel flusso)
+  $('btnOpen').style.display='inline-block'; $('btnOpen').disabled=false; $('btnOpen').classList.remove('dim');
+  $('btnShare').style.display='inline-block'; $('btnShare').disabled=true; $('btnShare').classList.add('dim');
+
+  // swappa Start → Finish
   $('btnStart').style.display='none';
   $('btnFinish').style.display='inline-block';
 };
 
-/* ===== Apri e Condividi ===== */
+/* ===== Apri (dopo Start) → poi scompare, al suo posto resta Condividi ===== */
 $('btnOpen').onclick = ()=>{
   const url=(addr.value||'').trim(); if(!url){ alert('URL obbligatoria'); return; }
-  const features='noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no';
-  window.open(url, '_we_clean_'+Date.now(), features);
-  log('Finestra/pagina aperta.');
-  enable($('btnShare'), true);
+  window.open(url, '_we_clean_'+Date.now(), 'noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no');
+  logLine('Finestra/pagina aperta.');
+  $('btnOpen').style.display='none';
+  $('btnShare').disabled=false; $('btnShare').classList.remove('dim');
 };
+
+/* ===== Condividi: dopo click DIVENTA inattivo PER SEMPRE (nessuna ri-condivisione) ===== */
 $('btnShare').onclick = async ()=>{
   try{
     const constraints={video:{displaySurface:'window',preferCurrentTab:true},audio:false};
     stream = await navigator.mediaDevices.getDisplayMedia(constraints);
     video.srcObject = stream; await video.play();
     if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview);
-    log('Condivisione attiva (anteprima LIVE in alto a sinistra).');
+    logLine('Condivisione attiva (preview a sinistra).', true);
+
     const vt = stream.getVideoTracks()[0];
-    vt.addEventListener('ended', ()=>{ log('Condivisione terminata'); enable($('btnSnap'), false); enable($('btnSave'), false); $('btnShare').disabled=false; $('btnShare').classList.remove('dim'); });
-    // dopo la condivisione disattivo il tasto Share
+    vt.addEventListener('ended', ()=>{
+      logLine('Condivisione terminata. Sessione bloccata: niente ulteriori scatti.', true);
+      // blocca definitivamente
+      lockedShare = true;
+      disableShotUi();
+    });
+
+    // abilita comandi post-share
+    enable($('btnFull'), true); enable($('btnAssets'), true); enable($('btnSnap'), true);
+
+    // disabilita per sempre Share
     $('btnShare').disabled=true; $('btnShare').classList.add('dim');
-    // Abilita comandi post-start
-    enable($('btnFull'), true); enable($('btnAssets'), true);
-    enable($('btnSnap'), true);
   }catch(e){ alert('Condivisione negata: '+(e.message||e)); }
 };
+function enable(el, on){ el.disabled=!on; el.classList.toggle('dim', !on); }
+function disableShotUi(){ enable($('btnSnap'), false); enable($('btnSave'), false); }
 
-/* ===== FULL PAGE (SM 1920x1240 + 1920xfull) + PSI ===== */
+/* ===== Verifica URL lato server prima di OGNI scatto ===== */
+async function verifyUrlOrStop(){
+  const chk = await GET('mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(addr.value||''));
+  if(!chk.ok){ logLine('Verifica URL fallita: '+(chk.error||'mismatch')+' — operazione bloccata.', true); return false; }
+  if(chk.mismatch){ logLine('URL modificata rispetto alla sessione iniziale. Blocco scatto.', true); return false; }
+  return true;
+}
+
+/* ===== Full page: SM 1920x1240 + 1920xfull + PSI se disponibile ===== */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
+  if(lockedShare){ logLine('Condivisione chiusa: “Cattura full page” comunque consentita (SM/PSI).'); }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
-  setActive($('btnFull'), true); enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false);
+  enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false);
+  $('btnFull').classList.add('primary');
+
   try{
-    // SM 1920x1240
-    log('SM 1920x1240 in corso…');
+    logLine('SM 1920×1240 in corso…');
     let sm1=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240');
-    if(!sm1.ok) throw new Error(sm1.error||'SM (1240) error');
-    let sv1=await POST({authToken:TOKEN,sid:SID,dataUrl:sm1.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920x1240'}}});
-    log('SM 1920x1240 salvato: '+sv1.name+' sha='+sv1.sha256);
+    if(!sm1.ok) throw new Error(sm1.error||'SM 1240');
+    let sv1=await POST({authToken:TOKEN,sid:SID,dataUrl:sm1.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920x1240'}}});
+    logLine('Salvato: '+sv1.name+' sha='+sv1.sha256, true);
 
-    // SM 1920xfull
-    log('SM 1920xfull in corso…');
+    logLine('SM 1920×full in corso…');
     let sm2=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920xfull');
-    if(!sm2.ok) throw new Error(sm2.error||'SM (full) error');
-    let sv2=await POST({authToken:TOKEN,sid:SID,dataUrl:sm2.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920xfull'}}});
-    log('SM 1920xfull salvato: '+sv2.name+' sha='+sv2.sha256);
+    if(!sm2.ok) throw new Error(sm2.error||'SM full');
+    let sv2=await POST({authToken:TOKEN,sid:SID,dataUrl:sm2.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920xfull'}}});
+    logLine('Salvato: '+sv2.name+' sha='+sv2.sha256, true);
 
-    // PSI final screenshot (se configurato)
-    log('PSI final screenshot…');
+    logLine('PSI final screenshot…');
     let psi=await GET('mode=psi&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u));
     if(psi.ok && psi.dataUrl){
-      let sv3=await POST({authToken:TOKEN,sid:SID,dataUrl:psi.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'psi',label:'PSI_FINAL'}}});
-      log('PSI salvato: '+sv3.name+' sha='+sv3.sha256);
+      let sv3=await POST({authToken:TOKEN,sid:SID,dataUrl:psi.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'psi',label:'PSI_FINAL'}}});
+      logLine('PSI salvato: '+sv3.name+' sha='+sv3.sha256, true);
     }else{
-      log('PSI non disponibile (manca key o nessuna immagine).');
+      logLine('PSI non disponibile.');
     }
-  }catch(e){ log('Errore full-page: '+(e.message||e)); }
-  setActive($('btnFull'), false); enable($('btnAssets'), true); enable($('btnSnap'), true);
+  }catch(e){ logLine('Errore full page: '+(e.message||e), true); }
+  $('btnFull').classList.remove('primary'); enable($('btnAssets'), true); if(!lockedShare){ enable($('btnSnap'), true); }
 };
 
-/* ===== ASSET ===== */
+/* ===== Asset ===== */
 $('btnAssets').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
-  setActive($('btnAssets'), true); enable($('btnFull'), false); enable($('btnSnap'), false); enable($('btnSave'), false);
-  log('Scarico asset… attendere');
+  $('btnAssets').classList.add('primary'); enable($('btnFull'), false); enable($('btnSnap'), false); enable($('btnSave'), false);
+  logLine('Scarico asset… attendere');
   try{
     const sj=await GET('mode=snapshot&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+'&u='+encodeURIComponent(u));
     if(!sj.ok) throw new Error(sj.error||'Snapshot error');
-    log('HTML+asset salvati: '+sj.count);
-  }catch(e){ log('Errore asset: '+(e.message||e)); }
-  setActive($('btnAssets'), false); enable($('btnFull'), true); enable($('btnSnap'), true);
+    logLine('HTML+asset salvati: '+sj.count, true);
+  }catch(e){ logLine('Errore asset: '+(e.message||e), true); }
+  $('btnAssets').classList.remove('primary'); enable($('btnFull'), true); if(!lockedShare){ enable($('btnSnap'), true); }
 };
 
 /* ===== Fence + Scatto + Salva ===== */
@@ -301,19 +320,24 @@ $('btnAssets').onclick = async ()=>{
 })();
 
 $('btnSnap').onclick = async ()=>{
+  if(lockedShare){ logLine('Condivisione chiusa: scatto non consentito in questa sessione.', true); return; }
+  // verifica URL non variata
+  if(!(await verifyUrlOrStop())) return;
+
   const live = (stream && stream.getVideoTracks().length && stream.getVideoTracks()[0].readyState==='live');
-  if(!live){ log('Condivisione non attiva: premi “Condividi” e riprova.'); enable($('btnSnap'), false); return; }
-  setActive($('btnSnap'), true); enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSave'), false);
+  if(!live){ logLine('Condivisione non attiva: impossibile scattare.', true); disableShotUi(); return; }
+
+  $('btnSnap').classList.add('primary'); enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSave'), false);
   try{
     const track=stream.getVideoTracks()[0]; const cap=new ImageCapture(track);
     const bitmap=await cap.grabFrame();
     const c=document.createElement('canvas'); c.width=bitmap.width; c.height=bitmap.height; c.getContext('2d').drawImage(bitmap,0,0);
     imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
-    hasShot=true; enable($('btnSave'), true); setActive($('btnSave'), true);
-    log('Scatto eseguito → immagine grande pronta.');
+    hasShot=true; enable($('btnSave'), true);
+    logLine('Scatto eseguito → immagine grande pronta.', true);
     note('SNAP_OK',{w:bitmap.width,h:bitmap.height});
-  }catch(e){ log('Errore scatto: '+(e.message||e)); }
-  setActive($('btnSnap'), false); enable($('btnFull'), true); enable($('btnAssets'), true);
+  }catch(e){ logLine('Errore scatto: '+(e.message||e), true); }
+  $('btnSnap').classList.remove('primary'); enable($('btnFull'), true); enable($('btnAssets'), true);
 };
 
 function makePayload(){
@@ -338,32 +362,36 @@ function makePayload(){
 $('btnSave').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   if(!hasShot){ alert('Fai prima uno scatto'); return; }
-  const payload = await makePayload(); if(!payload){ alert('Nessuna immagine'); return; }
-  setActive($('btnSave'), true); enable($('btnFull'), false); enable($('btnAssets'), false);
+  // doppia verifica URL prima del salvataggio
+  if(!(await verifyUrlOrStop())) return;
+
+  $('btnSave').classList.add('primary'); enable($('btnFull'), false); enable($('btnAssets'), false);
+  const payload = await makePayload(); if(!payload){ alert('Nessuna immagine'); $('btnSave').classList.remove('primary'); return; }
   const u=(addr.value||'').trim();
   const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-capture',label:(payload.crop?'FRAME_CROP':'FRAME_FULL')},crop:payload.crop}});
-  if(!sv.ok){ alert(sv.error||'Errore salvataggio'); setActive($('btnSave'), false); return; }
-  log('PNG salvato: '+sv.name+' sha='+sv.sha256); note('PNG_SAVED',{name:sv.name,sha:sv.sha256});
-  setActive($('btnSave'), false); enable($('btnFull'), true); enable($('btnAssets'), true);
+  if(!sv.ok){ alert(sv.error||'Errore salvataggio'); $('btnSave').classList.remove('primary'); return; }
+  logLine('PNG salvato: '+sv.name+' sha='+sv.sha256, true);
+  $('btnSave').classList.remove('primary'); enable($('btnFull'), true); enable($('btnAssets'), true);
 };
 
-/* ===== Termina ===== */
+/* ===== Termina (rosso) ===== */
 $('btnFinish').onclick = async ()=>{
   if(!SID){ alert('Nessuna sessione'); return; }
-  setState('Creo ZIP…'); setActive($('btnFinish'), true);
+  setState('Creo ZIP…'); $('btnFinish').classList.add('primary');
   const q='mode=finish'
     +'&t='+encodeURIComponent(TOKEN||'')
     +'&id='+encodeURIComponent(SID)
     +(rcpts.value?('&to='+encodeURIComponent(rcpts.value)):'')
-    +(subj.value?('&subj='+encodeURIComponent(subj.value)):'')
+    + '&subj='+encodeURIComponent(window._SUBJ_DEFAULT||'Web Evidence – Pacchetto prove')
     +'&pecMode='+encodeURIComponent(document.getElementById('pecMode').value);
   const js=await GET(q);
-  if(!js.ok){ alert(js.error||'Errore finish'); setState('Errore'); setActive($('btnFinish'), false); return; }
-  log('ZIP: '+js.zipUrl); setState('Completato');
+  if(!js.ok){ alert(js.error||'Errore finish'); setState('Errore'); $('btnFinish').classList.remove('primary'); return; }
+  logLine('ZIP: '+js.zipUrl, true); setState('Completato');
   document.querySelectorAll('button').forEach(b=> b.disabled=true);
 };
 
-setState('Pronto');
+/* ===== avvia disegno anteprima ===== */
+(function(){ if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview); })();
 </script>
 </body>
 </html>
