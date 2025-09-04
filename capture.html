@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v14.7</title>
+<title>Web Evidence – v14.8</title>
 <style>
   :root{--bd:#ddd;--accent:#0b5cff}
   *{box-sizing:border-box}
@@ -34,7 +34,7 @@
   .cap-wrap{position:relative;padding:12px;overflow:auto}
   #imgLarge{max-width:100%;display:none;border-radius:12px;border:1px solid #eee;background:#000}
   #imgLarge.hasSrc{display:block}
-  #rect{position:absolute;border:2px dashed #fff;display:none;pointer-events:none} /* niente overlay grigio */
+  #rect{position:absolute;border:2px dashed #fff;display:none;pointer-events:none}
 
   .logcol{grid-column:3; display:flex; flex-direction:column; gap:10px}
   #log{border:1px solid #eee;border-radius:10px;padding:8px;overflow:auto;font:12px/1.5 ui-monospace,Menlo,Consolas,monospace;background:#fafafa;white-space:pre-wrap}
@@ -108,9 +108,9 @@
 </div>
 
 <script>
-/* ===== Query ===== */
+/* ===== Query + Config ===== */
 const qs=new URLSearchParams(location.search);
-const APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
+let APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
 if(qs.get('u')) addr.value=qs.get('u');
 if(qs.get('client')) client.value=qs.get('client');
 if(qs.get('dom')) client.dataset.domain=qs.get('dom');
@@ -127,18 +127,18 @@ const $ = id => document.getElementById(id);
 const video = document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
 const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWrap');
 
-/* ===== Altezze dinamiche: cattura + log partono sotto i pulsanti e riempiono fino a fondo ===== */
+/* ===== Altezze dinamiche: cattura + log partono sotto i pulsanti e riempiono ===== */
 function setHeights(){
-  const top = document.getElementById('controlsBox').getBoundingClientRect().bottom + window.scrollY + 12;
-  const avail = window.innerHeight - (document.getElementById('topbar').getBoundingClientRect().height) - (document.getElementById('controlsBox').getBoundingClientRect().height) - 40;
-  capWrap.style.height = Math.max(360, avail) + 'px';
-  document.getElementById('log').style.height = Math.max(360, avail) + 'px';
+  const headerH = $('topbar').getBoundingClientRect().height;
+  const controlsH = $('controlsBox').getBoundingClientRect().height;
+  const avail = Math.max(360, window.innerHeight - headerH - controlsH - 48);
+  capWrap.style.height = avail + 'px';
+  $('log').style.height = avail + 'px';
 }
 setHeights(); window.addEventListener('resize', setHeights);
 
 /* ===== Helpers ===== */
 const setState = s => $('state').textContent=s;
-function setDim(el, on){ el.classList.toggle('dim', !!on); el.classList.toggle('primary', !on?false:el.classList.contains('primary')); }
 function setActive(el, active){ if(active){ el.classList.add('primary'); }else{ el.classList.remove('primary'); } }
 function enable(el, on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const log = s => { const L=$('log'); L.textContent+=(L.textContent?'\\n':'')+'['+(new Date().toLocaleTimeString())+'] '+s; L.scrollTop=L.scrollHeight; setState(s); };
@@ -146,6 +146,24 @@ async function note(type, data={}){ if(!SID) return; const q='mode=note&t='+enco
 function hasStream(){ return !!(video.srcObject && video.getVideoTracks().length && video.videoWidth); }
 function parseHost(u){ try{ return new URL(u).hostname.replace(/^www\\./,''); }catch(e){ const a=document.createElement('a'); a.href=u; return (a.hostname||'').replace(/^www\\./,''); } }
 
+/* ===== Carica CFG dal server per riempire campi ===== */
+async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); return r.json(); }
+async function POST(body){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(body)}); return r.json(); }
+
+(async function loadCfg(){
+  try{
+    const cfg = await GET('mode=cfg');
+    if(cfg.ok){
+      if(!TOKEN && cfg.token) TOKEN = cfg.token;
+      if(!rcpts.value && cfg.defaultTo) rcpts.value = cfg.defaultTo;
+      if(!subj.value && cfg.defaultSubj) subj.value = cfg.defaultSubj;
+      if(!client.dataset.domain && cfg.defaultDomain) client.dataset.domain = cfg.defaultDomain;
+      log('Configurazione letta dal foglio DATA.');
+    }
+  }catch(_){}
+})();
+
+/* ===== Preview 300×300 ===== */
 function drawPreview(){
   if(!hasStream()){ rafId=requestAnimationFrame(drawPreview); return; }
   const ctx=thumb.getContext('2d'); const tw=thumb.width, th=thumb.height; const vw=video.videoWidth, vh=video.videoHeight; if(!vw||!vh){ rafId=requestAnimationFrame(drawPreview); return; }
@@ -182,10 +200,7 @@ $('btnFlow').addEventListener('click', async ()=>{
   }
 });
 
-/* ===== Sessione ===== */
-async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); return r.json(); }
-async function POST(body){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(body)}); return r.json(); }
-
+/* ===== START ===== */
 $('btnStart').onclick = async ()=>{
   const cli=client.value.trim(), u=(addr.value||'').trim();
   if(!cli){ alert('Cliente obbligatorio'); return; }
@@ -194,7 +209,7 @@ $('btnStart').onclick = async ()=>{
   setState('Creo sessione…'); enable($('btnStart'), false); setActive($('btnStart'), true);
   const js=await GET(
     'mode=start'
-    +'&t='+encodeURIComponent(TOKEN)
+    +'&t='+encodeURIComponent(TOKEN||'')
     +'&u='+encodeURIComponent(u)
     +'&client='+encodeURIComponent(cli)
     +(domOverride?('&domain='+encodeURIComponent(domOverride)):'')
@@ -208,7 +223,6 @@ $('btnStart').onclick = async ()=>{
   SID=js.sessionId;
   log('Sessione: '+js.base+(js.folderUrl?('  →  '+js.folderUrl):''));
   setState('Pronto'); note('SESSION_START',{base:js.base});
-  // Attiva tutti i comandi
   enable($('btnFull'), true); enable($('btnAssets'), true);
   enable($('btnSnap'), true); enable($('btnReset'), true);
   enable($('btnSave'), false);
@@ -216,14 +230,14 @@ $('btnStart').onclick = async ()=>{
   setActive($('btnStart'), false);
 };
 
-/* ===== Azioni: Full page (SM) e Asset ===== */
+/* ===== FULL PAGE / ASSET ===== */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
   setActive($('btnFull'), true); setActive($('btnAssets'), false);
   log('Eseguo Screenshot cattura completa…');
   try{
-    const sm=await GET('mode=sm&t='+encodeURIComponent(TOKEN)+'&u='+encodeURIComponent(u)+'&dim=1920xfull');
+    const sm=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920xfull');
     if(!sm.ok){ throw new Error(sm.error||'SM error'); }
     const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:sm.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screenshotmachine',label:'SM_FULL'}}});
     if(!sv.ok) throw new Error(sv.error||'Save error');
@@ -238,7 +252,7 @@ $('btnAssets').onclick = async ()=>{
   setActive($('btnAssets'), true); setActive($('btnFull'), false);
   log('Scarico asset…');
   try{
-    const sj=await GET('mode=snapshot&t='+encodeURIComponent(TOKEN)+'&id='+encodeURIComponent(SID)+'&u='+encodeURIComponent(u));
+    const sj=await GET('mode=snapshot&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+'&u='+encodeURIComponent(u));
     if(!sj.ok) throw new Error(sj.error||'Snapshot error');
     log('HTML+asset salvati.'); note('ASSETS_SAVED');
   }catch(e){ log('Errore asset: '+(e.message||e)); }
@@ -265,9 +279,8 @@ $('btnAssets').onclick = async ()=>{
 })();
 
 $('btnSnap').onclick = async ()=>{
-  if(!hasStream() || !stream || stream.getVideoTracks()[0].readyState!=='live'){
-    log('Condivisione non attiva: premi “Condividi” e riprova.'); enable($('btnSnap'), false); return;
-  }
+  const live = (stream && stream.getVideoTracks().length && stream.getVideoTracks()[0].readyState==='live');
+  if(!live){ log('Condivisione non attiva: premi “Condividi” e riprova.'); enable($('btnSnap'), false); return; }
   setActive($('btnSnap'), true);
   try{
     const track=stream.getVideoTracks()[0]; const cap=new ImageCapture(track);
@@ -316,7 +329,7 @@ $('btnFinish').onclick = async ()=>{
   if(!SID){ alert('Nessuna sessione'); return; }
   setState('Creo ZIP…');
   const q='mode=finish'
-    +'&t='+encodeURIComponent(TOKEN)
+    +'&t='+encodeURIComponent(TOKEN||'')
     +'&id='+encodeURIComponent(SID)
     +(rcpts.value?('&to='+encodeURIComponent(rcpts.value)):'')
     +(subj.value?('&subj='+encodeURIComponent(subj.value)):'')
