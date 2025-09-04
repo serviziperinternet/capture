@@ -3,15 +3,15 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v14.2</title>
+<title>Web Evidence – v14.3</title>
 <style>
   :root{--bd:#ddd;--accent:#0b5cff;--mut:#666}
   *{box-sizing:border-box}
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0;color:#111;background:#fff}
-  header{display:grid;grid-template-columns:170px 1fr auto auto 260px 1fr auto auto auto;gap:8px;align-items:center;border-bottom:1px solid #eee;padding:10px}
-  input,button,select,a.btn{padding:8px;border:1px solid var(--bd);border-radius:10px;background:#fafafa;text-decoration:none;color:inherit;display:inline-block;text-align:center}
+  header{display:grid;grid-template-columns:170px 1fr auto auto 260px 1fr auto auto;gap:8px;align-items:center;border-bottom:1px solid #eee;padding:10px}
+  input,button,select{padding:8px;border:1px solid var(--bd);border-radius:10px;background:#fafafa}
   input[type="url"], input[type="text"]{background:#fff}
-  button.primary,a.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+  button.primary{background:var(--accent);border-color:var(--accent);color:#fff}
   button[disabled]{opacity:.55;cursor:not-allowed}
   #state{justify-self:end;font-size:12px;color:#222;background:#f3f4f6;border-radius:999px;padding:.25rem .6rem}
 
@@ -40,8 +40,8 @@
 <header>
   <input id="client" placeholder="Cliente…" />
   <input id="addr" type="url" placeholder="https://…" />
-  <button id="btnOpen" type="button">Apri finestra pulita</button>
-  <a id="aOpen" class="btn" href="#" target="_blank" rel="noopener noreferrer">Apri in nuova scheda</a>
+  <button id="btnOpen" type="button">Apri sito in finestra</button>
+  <button id="btnPreview" class="primary" type="button">Condividi</button>
 
   <input id="rcpts" placeholder="Destinatari PEC/email" />
   <input id="subj" value="Web Evidence – Pacchetto prove" />
@@ -128,18 +128,14 @@ function drawPreview(){
   rafId=requestAnimationFrame(drawPreview);
 }
 
-/* ===== Apertura finestra pulita + Selezione ===== */
+/* ===== Apri sito in finestra + Condividi ===== */
 function openClean(u){
   const url=(u||'').trim(); if(!url){ alert('URL obbligatoria'); return; }
-  // doppio canale: popup e ancora (per aggirare eventuale block dei popup)
   const features='noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no';
-  const w = window.open(url, '_we_clean_'+Date.now(), features);
-  $('aOpen').href = url;
-  log('Finestra/pagina aperta. Se il browser blocca i popup, usa “Apri in nuova scheda”.');
-  return w;
+  window.open(url, '_we_clean_'+Date.now(), features);
+  log('Finestra/pagina aperta.');
 }
 $('btnOpen').addEventListener('click', ()=> openClean(addr.value));
-$('aOpen').addEventListener('click', ()=> log('Apertura in nuova scheda richiesta.'));
 
 $('btnPreview').onclick = async ()=>{
   try{
@@ -210,7 +206,7 @@ $('btnFinish').onclick = async ()=>{
 })();
 
 $('btnSnap').onclick = async ()=>{
-  if(!hasStream()){ alert('Attiva “Seleziona finestra”'); return; }
+  if(!hasStream()){ alert('Attiva “Condividi”'); return; }
   try{
     const track=stream.getVideoTracks()[0]; const cap=new ImageCapture(track);
     const bitmap=await cap.grabFrame();
