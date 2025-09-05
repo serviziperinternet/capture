@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v15.3.3</title>
+<title>Web Evidence – v15.3.4</title>
 <style>
   :root{--bd:#ddd;--ok:#18a957;--danger:#e11d48}
   *{box-sizing:border-box}
@@ -94,30 +94,25 @@
 </div>
 
 <script>
-/* util */
 const $=id=>document.getElementById(id);
 function logLine(s, important=false){ const L=$('logBox'); const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':''); L.textContent=entry+'\n'+L.textContent; L.scrollTop=0; }
 function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
-/* query/config */
 const qs=new URLSearchParams(location.search);
 let APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
 if(qs.get('u')) addr.value=qs.get('u'); if(qs.get('client')) client.value=qs.get('client');
 if(qs.get('dom')) client.dataset.domain=qs.get('dom'); if(qs.get('domain')) client.dataset.domain=qs.get('domain');
 if(qs.get('to')) $('rcpts').value=qs.get('to');
 
-/* stato */
 let SID='', stream=null, rafId=null, hasShot=false, shareActive=false, recording=false;
 let recorder=null, recChunks=[];
 const video=document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
 const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWrap');
 
-/* server */
 async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); return r.json(); }
 async function POST(b){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(b)}); return r.json(); }
 
-/* busy guard */
 let BUSY=false, PREV_STATE=null;
 function snapshotUIState(){ return {full:!$('btnFull').disabled, assets:!$('btnAssets').disabled, snap:!$('btnSnap').disabled, save:!$('btnSave').disabled, rec:!$('btnRec').disabled, stop:!$('btnStop').disabled, open:!$('btnOpen').disabled&&$('btnOpen').style.display!=='none', share:!$('btnShare').disabled&&$('btnShare').style.display!=='none', finish:!$('btnFinish').disabled&&$('btnFinish').style.display!=='none'}; }
 function setUIState(state){
@@ -173,7 +168,6 @@ async function withBusy(label, fn, opts){
   }
 }
 
-/* anteprima */
 function drawPreview(){
   const ctx=thumb.getContext('2d'); const tw=thumb.width, th=thumb.height;
   ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th);
@@ -185,7 +179,6 @@ function drawPreview(){
 }
 (function(){ if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview); setUIState('idle'); })();
 
-/* START */
 $('btnStart').onclick = async ()=>{
   if(SID){ logLine('Sessione già attiva.'); return; }
   const cli=client.value.trim(), url=(addr.value||'').trim();
@@ -209,7 +202,6 @@ $('btnStart').onclick = async ()=>{
   }, {restore:false});
 };
 
-/* Apri / Condividi */
 $('btnOpen').onclick = ()=>{
   const url=(addr.value||'').trim(); if(!url){ alert('URL obbligatoria'); return; }
   window.open(url, '_we_clean_'+Date.now(), 'noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no');
@@ -220,8 +212,7 @@ $('btnOpen').onclick = ()=>{
 };
 $('btnShare').onclick = async ()=>{
   await withBusy('Condivisione schermo', async ()=>{
-    const constraints={video:{frameRate:30, displaySurface:'browser', preferCurrentTab:true}, audio:false};
-    const s = await navigator.mediaDevices.getDisplayMedia(constraints);
+    const s = await navigator.mediaDevices.getDisplayMedia({video:{frameRate:30,displaySurface:'browser',preferCurrentTab:true},audio:false});
     stream = s; video.srcObject = s;
     await new Promise(r=>video.addEventListener('loadeddata', r, {once:true}));
     await video.play();
@@ -238,11 +229,12 @@ $('btnShare').onclick = async ()=>{
   }, {restore:false});
 };
 
-/* verifica URL */
 async function verifyUrlOrStop(){
   try{
     const chk=await GET('mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(addr.value||''));
-    if(!chk.ok || chk.mismatch){ logLine('URL variata / verifica fallita. Operazione bloccata.', true); return false; }
+    if(!chk.ok){ logLine('ERRORE verifica URL'); return false; }
+    if(chk.mismatch){ logLine('URL variata / verifica fallita. Orig='+chk.orig+' — Now='+chk.now, true); return false; }
+    logLine('Verifica URL OK: '+(chk.now||''));
     return true;
   }catch(e){
     logLine('ERRORE verifica URL: '+(e.message||e), true);
@@ -250,11 +242,13 @@ async function verifyUrlOrStop(){
   }
 }
 
-/* Full page */
+/* FULL PAGE */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
   await withBusy('Cattura full page', async ()=>{
+    let ok = await verifyUrlOrStop(); if(!ok) throw new Error('Verifica URL fallita');
+
     logLine('SM 1920×1240 in corso…');
     let sm1=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240');
     if(!sm1.ok) throw new Error(sm1.error||'SM 1240');
@@ -298,7 +292,6 @@ $('btnFull').onclick = async ()=>{
 })();
 
 async function ensureVideoReady(){
-  // attendo anche il videoHeight e 2 frame
   for(let i=0;i<25;i++){
     if(video.videoWidth>0 && video.videoHeight>0) { await new Promise(r=>requestAnimationFrame(r)); await new Promise(r=>requestAnimationFrame(r)); return true; }
     await sleep(120);
@@ -316,7 +309,7 @@ function isBlank(canvas){
 
 $('btnSnap').onclick = async ()=>{
   const vw=video.videoWidth, vh=video.videoHeight;
-  logLine('Click SCATTA (shareActive='+shareActive+', '+vw+'×'+vh+', state='+(stream && stream.getVideoTracks()[0] && stream.getVideoTracks()[0].readyState)+')');
+  logLine('Click SCATTA (shareActive='+shareActive+', '+vw+'×'+vh+')');
   await withBusy('Scatto', async ()=>{
     if(!shareActive) throw new Error('Condivisione non attiva');
     const ok = await verifyUrlOrStop(); if(!ok) throw new Error('Verifica URL fallita');
@@ -361,6 +354,7 @@ function makePayload(){
     };
   });
 }
+
 $('btnSave').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   if(!hasShot){ alert('Fai prima uno scatto'); return; }
@@ -369,9 +363,9 @@ $('btnSave').onclick = async ()=>{
     const payload = await makePayload(); if(!payload){ logLine('Nessuna immagine.'); return; }
     const u=(addr.value||'').trim();
     const label=(payload.crop?'FRAME_CROP':'FRAME_FULL');
-    const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-capture',label:label},crop:payload.crop}});
+    const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screen-capture',label:label},crop:payload.crop}});
     if(!sv.ok) throw new Error(sv.error||'Errore salvataggio');
-    logLine('PNG salvato: '+sv.name+' sha='+sv.sha256, true);
+    logLine('PNG salvato: '+sv.name+' sha='+sv.sha256+' (url='+u+'; final='+sv.finalUrl+')', true);
   });
 };
 
@@ -389,9 +383,9 @@ $('btnRec').onclick = async ()=>{
       const blob = new Blob(recChunks, { type: recorder.mimeType || 'video/webm' });
       const b64 = await blobToDataURL(blob);
       const u=(addr.value||'').trim();
-      const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:b64,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-capture',label:'REC_VIDEO'}}});
+      const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:b64,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screen-capture',label:'REC_VIDEO'}}});
       if(!sv.ok) throw new Error(sv.error||'Errore salvataggio video');
-      logLine('VIDEO salvato: '+sv.name+' sha='+sv.sha256, true);
+      logLine('VIDEO salvato: '+sv.name+' sha='+sv.sha256+' (url='+u+'; final='+sv.finalUrl+')', true);
     };
     recorder.start();
   }catch(e){ logLine('ERRORE REC: '+(e.message||e), true); }
