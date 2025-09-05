@@ -3,12 +3,11 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v15.2.3</title>
+<title>Web Evidence – v15.3</title>
 <style>
   :root{--bd:#ddd;--ok:#18a957;--danger:#e11d48}
   *{box-sizing:border-box}
   body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0;color:#111;background:#fff}
-
   header{padding:10px;border-bottom:1px solid #eee}
   .hrow{display:grid;gap:8px;align-items:center}
   .row1{grid-template-columns:170px 1fr auto}
@@ -18,22 +17,17 @@
   .success{background:var(--ok)!important;border-color:var(--ok)!important;color:#fff}
   .danger{background:var(--danger)!important;border-color:var(--danger)!important;color:#fff}
   button[disabled]{opacity:.55;cursor:not-allowed}
-
   .wrap{display:grid;grid-template-columns:320px 1fr;gap:12px;padding:12px}
   .card{border:1px solid #eee;border-radius:12px;background:#fff}
   .card h3{margin:0;padding:10px 12px;border-bottom:1px solid #f3f4f4;font-size:13px;font-weight:700}
-
   .side{padding:12px}
   #thumb{width:300px;height:300px;display:block;background:#000;border:1px dashed #ccc;border-radius:10px}
   .mut{color:#666}
-
   .controls{display:flex;flex-direction:column;gap:10px;padding:12px}
   .controls .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .dim{opacity:.6}
-
   #logWrap{padding:0 12px 12px}
   #logBox{height:190px;border:1px solid #eee;border-radius:10px;padding:10px;overflow:auto;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;background:#fafafa;white-space:pre-wrap}
-
   .capCard{grid-column:2}
   .cap-wrap{position:relative;padding:12px;overflow:auto;border-top:1px solid #f3f4f6}
   #imgLarge{max-width:100%;display:none;border-radius:12px;border:1px solid #eee;background:#000}
@@ -42,7 +36,6 @@
 </style>
 </head>
 <body>
-
 <header>
   <div class="hrow row1">
     <input id="client" placeholder="Cliente…" />
@@ -65,13 +58,13 @@
 </header>
 
 <div class="wrap">
-  <div class="card side" style="grid-column:1">
+  <div class="card side">
     <h3>Anteprima LIVE (300×300)</h3>
     <canvas id="thumb" width="300" height="300" aria-label="Anteprima"></canvas>
     <div class="mut" style="margin-top:8px">1) Inizia → 2) Apri → 3) Condividi</div>
   </div>
 
-  <div class="card" style="grid-column:2">
+  <div class="card">
     <h3>Controlli</h3>
     <div class="controls" id="controlsBox">
       <div class="row">
@@ -99,324 +92,153 @@
 </div>
 
 <script>
-/* =======================
-   UTIL / STATO / SERVER
-   ======================= */
-// Selettori
 const $=id=>document.getElementById(id);
-// Log a scorrimento (ultimo in alto)
-function logLine(s, important=false){
-  const L=$('logBox');
-  const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':'');
-  L.textContent = entry + '\n' + L.textContent; L.scrollTop=0;
-}
+function logLine(s, important=false){ const L=$('logBox'); const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':''); L.textContent=entry+'\n'+L.textContent; L.scrollTop=0; }
 function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
-
-// Query string (app/tokens/url)
 const qs=new URLSearchParams(location.search);
 let APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
-if(qs.get('u')) addr.value=qs.get('u');
-if(qs.get('client')) client.value=qs.get('client');
-if(qs.get('dom')) client.dataset.domain=qs.get('dom');
-if(qs.get('domain')) client.dataset.domain=qs.get('domain');
+if(qs.get('u')) addr.value=qs.get('u'); if(qs.get('client')) client.value=qs.get('client');
+if(qs.get('dom')) client.dataset.domain=qs.get('dom'); if(qs.get('domain')) client.dataset.domain=qs.get('domain');
 if(qs.get('to')) $('rcpts').value=qs.get('to');
 
-// Stato runtime
-let SID=''; let stream=null; let rafId=null; let hasShot=false; let shareActive=false;
+let SID='', stream=null, rafId=null, hasShot=false, shareActive=false;
 const video=document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
 const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWrap');
 
-// Server helpers
 async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); return r.json(); }
 async function POST(b){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(b)}); return r.json(); }
 
-/* =======================
-   BUSY GUARD + UI STATE
-   ======================= */
 let BUSY=false, PREV_STATE=null;
-function snapshotUIState(){
-  return {
-    full:!$('btnFull').disabled, assets:!$('btnAssets').disabled, snap:!$('btnSnap').disabled, save:!$('btnSave').disabled,
-    open:!$('btnOpen').disabled && $('btnOpen').style.display!=='none',
-    share:!$('btnShare').disabled && $('btnShare').style.display!=='none',
-    finish:!$('btnFinish').disabled && $('btnFinish').style.display!=='none'
-  };
-}
+function snapshotUIState(){ return {full:!$('btnFull').disabled, assets:!$('btnAssets').disabled, snap:!$('btnSnap').disabled, save:!$('btnSave').disabled, open:!$('btnOpen').disabled&&$('btnOpen').style.display!=='none', share:!$('btnShare').disabled&&$('btnShare').style.display!=='none', finish:!$('btnFinish').disabled&&$('btnFinish').style.display!=='none'}; }
 function setUIState(state){
-  if(state==='idle'){
-    enable($('btnFull'), false); enable($('btnAssets'), false);
-    enable($('btnSnap'), false); enable($('btnSave'), false);
-    $('btnOpen').style.display='none'; $('btnShare').style.display='none';
-  }
-  if(state==='started'){
-    // Solo "Apri", Full/Asset attivi, Scatta disabilitato finché non condividi
-    $('btnOpen').style.display='inline-block'; enable($('btnOpen'), true);
-    $('btnShare').style.display='none';
-    enable($('btnFull'), true); enable($('btnAssets'), true);
-    enable($('btnSnap'), false); enable($('btnSave'), false);
-  }
-  if(state==='shared'){
-    enable($('btnFull'), true); enable($('btnAssets'), true);
-    enable($('btnSnap'), true); enable($('btnSave'), hasShot);
-  }
-  if(state==='locked'){ // share terminata
-    enable($('btnSnap'), false); enable($('btnSave'), false);
-    enable($('btnFull'), true); enable($('btnAssets'), true);
-  }
-  if(state==='finished'){
-    document.querySelectorAll('button').forEach(b=> b.disabled=true);
-  }
+  if(state==='idle'){ enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false); $('btnOpen').style.display='none'; $('btnShare').style.display='none'; }
+  if(state==='started'){ $('btnOpen').style.display='inline-block'; enable($('btnOpen'), true); $('btnShare').style.display='none'; enable($('btnFull'), true); enable($('btnAssets'), true); enable($('btnSnap'), false); enable($('btnSave'), false); }
+  if(state==='shared'){ enable($('btnFull'), true); enable($('btnAssets'), true); enable($('btnSnap'), true); enable($('btnSave'), hasShot); }
+  if(state==='locked'){ enable($('btnSnap'), false); enable($('btnSave'), false); enable($('btnFull'), true); enable($('btnAssets'), true); }
+  if(state==='finished'){ document.querySelectorAll('button').forEach(b=>b.disabled=true); }
 }
-async function withBusy(label, fn, opts){
-  const restore = !(opts && opts.restore===false);
-  if(BUSY){ logLine('ATTESA PER: '+BUSY); return; }
-  BUSY=label; PREV_STATE=snapshotUIState();
-  document.querySelectorAll('button').forEach(b=> b.disabled=true);
-  logLine('ATTESA PER: '+label, true);
+async function withBusy(label, fn, opts){ const restore=!(opts&&opts.restore===false); if(BUSY){ logLine('ATTESA PER: '+BUSY); return; } BUSY=label; PREV_STATE=snapshotUIState(); document.querySelectorAll('button').forEach(b=>b.disabled=true); logLine('ATTESA PER: '+label, true);
   try{ const res=await fn(); logLine('PRONTO: '+label, true); return res; }
   catch(e){ logLine('ERRORE in '+label+': '+(e.message||e), true); }
-  finally{
-    BUSY=false;
-    if(restore && PREV_STATE){
-      enable($('btnFull'), !!PREV_STATE.full);
-      enable($('btnAssets'), !!PREV_STATE.assets);
-      enable($('btnSnap'), !!PREV_STATE.snap);
-      enable($('btnSave'), !!PREV_STATE.save);
-      if($('btnOpen').style.display!=='none') $('btnOpen').disabled=!PREV_STATE.open;
-      if($('btnShare').style.display!=='none') $('btnShare').disabled=!PREV_STATE.share;
-      if($('btnFinish').style.display!=='none') $('btnFinish').disabled=!PREV_STATE.finish;
-    }
-  }
-}
+  finally{ BUSY=false; if(restore && PREV_STATE){ enable($('btnFull'), !!PREV_STATE.full); enable($('btnAssets'), !!PREV_STATE.assets); enable($('btnSnap'), !!PREV_STATE.snap); enable($('btnSave'), !!PREV_STATE.save); if($('btnOpen').style.display!=='none') $('btnOpen').disabled=!PREV_STATE.open; if($('btnShare').style.display!=='none') $('btnShare').disabled=!PREV_STATE.share; if($('btnFinish').style.display!=='none') $('btnFinish').disabled=!PREV_STATE.finish; } } }
 
-/* =======================
-   ANTEPRIMA (300×300)
-   ======================= */
-function drawPreview(){
-  const ctx=thumb.getContext('2d'); const tw=thumb.width, th=thumb.height;
-  ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th);
-  if(!(video.videoWidth && video.videoHeight)){ rafId=requestAnimationFrame(drawPreview); return; }
-  const vw=video.videoWidth, vh=video.videoHeight;
-  const br=vw/vh; let dw=tw, dh=tw/br; if(dh>th){ dh=th; dw=th*br; } const dx=(tw-dw)/2, dy=(th-dh)/2;
-  ctx.drawImage(video, dx, dy, dw, dh);
-  rafId=requestAnimationFrame(drawPreview);
-}
+function drawPreview(){ const ctx=thumb.getContext('2d'); const tw=thumb.width, th=thumb.height; ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th);
+  if(!(video.videoWidth&&video.videoHeight)){ rafId=requestAnimationFrame(drawPreview); return; }
+  const vw=video.videoWidth,vh=video.videoHeight, br=vw/vh; let dw=tw,dh=tw/br; if(dh>th){ dh=th; dw=th*br; } const dx=(tw-dw)/2,dy=(th-dh)/2; ctx.drawImage(video,dx,dy,dw,dh); rafId=requestAnimationFrame(drawPreview); }
 (function(){ if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview); setUIState('idle'); })();
 
-/* =======================
-   START (blocco URL)
-   ======================= */
-$('btnStart').onclick = async ()=>{
+/* START */
+$('btnStart').onclick=async()=>{
   if(SID){ logLine('Sessione già attiva.'); return; }
   const cli=client.value.trim(), url=(addr.value||'').trim();
   if(!cli){ alert('Cliente obbligatorio'); return; }
   if(!url){ alert('URL obbligatoria'); return; }
-
-  // Anti-manomissione: blocca subito campo URL/Cliente e il pulsante
-  $('btnStart').style.opacity=.5; $('btnStart').disabled=true;
-  addr.readOnly=true; addr.disabled=true; client.readOnly=true; client.disabled=true;
-  logLine('Avvio certificazione…');
-
+  $('btnStart').style.opacity=.5; $('btnStart').disabled=true; addr.readOnly=true; addr.disabled=true; client.readOnly=true; client.disabled=true; logLine('Avvio certificazione…');
   await withBusy('Avvio certificazione', async ()=>{
-    const host = (client.dataset.domain||'') || (new URL(url)).hostname.replace(/^www\./,'');
-    const js=await GET('mode=start&t='+encodeURIComponent(TOKEN||'')
-      +'&u='+encodeURIComponent(url)+'&client='+encodeURIComponent(cli)
-      +'&domain='+encodeURIComponent(host)
-      +'&ua='+encodeURIComponent(navigator.userAgent||'')
-      +'&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')
-      +'&lang='+encodeURIComponent(navigator.language||'')
-      +'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)
-      +'&page='+encodeURIComponent(location.href||'')
-    );
+    const host=(client.dataset.domain||'')||(new URL(url)).hostname.replace(/^www\./,'');
+    const js=await GET('mode=start&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(url)+'&client='+encodeURIComponent(cli)+'&domain='+encodeURIComponent(host)+'&ua='+encodeURIComponent(navigator.userAgent||'')+'&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')+'&lang='+encodeURIComponent(navigator.language||'')+'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)+'&page='+encodeURIComponent(location.href||''));
     if(!js.ok) throw new Error(js.error||'Errore avvio');
     SID=js.sessionId;
-
-    // Oggetto email auto
     const now=new Date(), pad=n=>('0'+n).slice(-2);
     window._SUBJ_DEFAULT='Web Evidence – '+cli+' – '+host+' – '+now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate())+' '+pad(now.getHours())+':'+pad(now.getMinutes());
-
-    logLine('SESSIONE: '+js.base+(js.folderUrl?(' → '+js.folderUrl):''), true);
-    if(js.trace) js.trace.forEach(t=>logLine(t));
-
-    // UI post-start
-    $('btnStart').style.display='none';
-    $('btnFinish').style.display='inline-block'; $('btnFinish').disabled=false;
-    setUIState('started'); // Scatta resta disabilitato finché non condividi
+    logLine('SESSIONE: '+js.base+(js.folderUrl?(' → '+js.folderUrl):''), true); if(js.trace) js.trace.forEach(t=>logLine(t));
+    $('btnStart').style.display='none'; $('btnFinish').style.display='inline-block'; $('btnFinish').disabled=false; setUIState('started');
   }, {restore:false});
 };
 
-/* =======================
-   APRI / CONDIVIDI
-   ======================= */
-$('btnOpen').onclick = ()=>{
+/* APRI / CONDIVIDI */
+$('btnOpen').onclick=()=>{
   const url=(addr.value||'').trim(); if(!url){ alert('URL obbligatoria'); return; }
-  window.open(url, '_we_clean_'+Date.now(), 'noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no');
-  logLine('Finestra/pagina aperta.');
-  $('btnOpen').style.display='none';
-  $('btnShare').style.display='inline-block';
-  enable($('btnShare'), true);
+  window.open(url,'_we_clean_'+Date.now(),'noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no');
+  logLine('Finestra/pagina aperta.'); $('btnOpen').style.display='none'; $('btnShare').style.display='inline-block'; enable($('btnShare'), true);
 };
-$('btnShare').onclick = async ()=>{
+$('btnShare').onclick=async()=>{
   await withBusy('Condivisione schermo', async ()=>{
-    const s = await navigator.mediaDevices.getDisplayMedia({video:true,audio:false});
-    stream = s; video.srcObject = s;
-    await new Promise(r=>video.addEventListener('loadedmetadata', r, {once:true}));
-    video.play();
+    const s=await navigator.mediaDevices.getDisplayMedia({video:true,audio:false}); stream=s; video.srcObject=s;
+    await new Promise(r=>video.addEventListener('loadedmetadata', r, {once:true})); video.play();
     if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview);
-    shareActive=true;
-    logLine('Condivisione attiva (anteprima a sinistra).', true);
-
-    const vt = s.getVideoTracks()[0];
-    vt.addEventListener('ended', ()=>{
-      logLine('Condivisione terminata. Scatto disattivato per questa sessione.', true);
-      shareActive=false; setUIState('locked');
-    });
-
-    setUIState('shared'); // qui abilito Scatta
-  });
+    shareActive=true; logLine('Condivisione attiva (anteprima a sinistra).', true);
+    const vt=s.getVideoTracks()[0]; vt.addEventListener('ended', ()=>{ logLine('Condivisione terminata. Scatto disattivato per questa sessione.', true); shareActive=false; setUIState('locked'); });
+    setUIState('shared'); // abilita Scatta
+    $('btnShare').disabled=true; $('btnShare').classList.add('dim');
+  }, {restore:false}); // <— non ripristinare lo stato precedente!
 };
 
-/* =======================
-   VERIFICA URL
-   ======================= */
-async function verifyUrlOrStop(){
-  const chk=await GET('mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(addr.value||''));
-  if(!chk.ok || chk.mismatch){ logLine('URL variata / verifica fallita. Operazione bloccata.', true); return false; }
-  return true;
-}
+/* CHECK URL */
+async function verifyUrlOrStop(){ const chk=await GET('mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(addr.value||'')); if(!chk.ok||chk.mismatch){ logLine('URL variata / verifica fallita. Operazione bloccata.', true); return false; } return true; }
 
-/* =======================
-   FULL PAGE
-   ======================= */
-$('btnFull').onclick = async ()=>{
+/* FULL PAGE */
+$('btnFull').onclick=async()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
   await withBusy('Cattura full page', async ()=>{
-    logLine('SM 1920×1240 in corso…');
-    let sm1=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240');
-    if(!sm1.ok) throw new Error(sm1.error||'SM 1240');
-    let sv1=await POST({authToken:TOKEN,sid:SID,dataUrl:sm1.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920x1240'}}});
-    logLine('Salvato: '+sv1.name+' sha='+sv1.sha256, true);
-
-    logLine('SM 1920×full in corso…');
-    let sm2=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920xfull');
-    if(!sm2.ok) throw new Error(sm2.error||'SM full');
-    let sv2=await POST({authToken:TOKEN,sid:SID,dataUrl:sm2.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920xfull'}}});
-    logLine('Salvato: '+sv2.name+' sha='+sv2.sha256, true);
-
-    logLine('PSI final screenshot…');
-    let psi=await GET('mode=psi&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u));
-    if(psi.ok && psi.dataUrl){
-      let sv3=await POST({authToken:TOKEN,sid:SID,dataUrl:psi.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'psi',label:'PSI_FINAL'}}});
-      logLine('PSI salvato: '+sv3.name+' sha='+sv3.sha256, true);
-    }else{
-      logLine('PSI non disponibile.');
-    }
+    logLine('SM 1920×1240 in corso…'); let sm1=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240'); if(!sm1.ok) throw new Error(sm1.error||'SM 1240');
+    let sv1=await POST({authToken:TOKEN,sid:SID,dataUrl:sm1.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920x1240'}}}); logLine('Salvato: '+sv1.name+' sha='+sv1.sha256, true);
+    logLine('SM 1920×full in corso…'); let sm2=await GET('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920xfull'); if(!sm2.ok) throw new Error(sm2.error||'SM full');
+    let sv2=await POST({authToken:TOKEN,sid:SID,dataUrl:sm2.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920xfull'}}}); logLine('Salvato: '+sv2.name+' sha='+sv2.sha256, true);
+    logLine('PSI final screenshot…'); let psi=await GET('mode=psi&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u));
+    if(psi.ok&&psi.dataUrl){ let sv3=await POST({authToken:TOKEN,sid:SID,dataUrl:psi.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'psi',label:'PSI_FINAL'}}}); logLine('PSI salvato: '+sv3.name+' sha='+sv3.sha256, true); } else { logLine('PSI non disponibile.'); }
   });
 };
 
-/* =======================
-   ASSET
-   ======================= */
-$('btnAssets').onclick = async ()=>{
+/* ASSET */
+$('btnAssets').onclick=async()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
   await withBusy('Scarica asset', async ()=>{
     const sj=await GET('mode=snapshot&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+'&u='+encodeURIComponent(u));
-    if(!sj.ok) throw new Error(sj.error||'Snapshot error');
-    logLine('HTML+asset salvati: '+sj.count, true);
+    if(!sj.ok) throw new Error(sj.error||'Snapshot error'); logLine('HTML+asset salvati: '+sj.count, true);
   });
 };
 
-/* =======================
-   FENCE + SCATTA + SALVA
-   ======================= */
-(function fence(){
-  let drag=false,sx=0,sy=0;
-  function bounds(e){ const r=capWrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
-  capWrap.addEventListener('pointerdown', e=>{
-    if(!imgLarge.classList.contains('hasSrc')) return;
-    if(e.button!==0 && e.pointerType==='mouse') return;
-    e.preventDefault(); drag=true; capWrap.setPointerCapture?.(e.pointerId);
-    const p=bounds(e); sx=p.x; sy=p.y; rect.style.display='block';
-    Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px'});
-  });
-  window.addEventListener('pointermove', e=>{
-    if(!drag) return; const p=bounds(e);
-    rect.style.left=Math.min(p.x,sx)+'px'; rect.style.top=Math.min(p.y,sy)+'px';
-    rect.style.width=Math.abs(p.x-sx)+'px'; rect.style.height=Math.abs(p.y-sy)+'px';
-  });
+/* Fence + Scatta + Salva */
+(function fence(){ let drag=false,sx=0,sy=0; function bounds(e){ const r=capWrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
+  capWrap.addEventListener('pointerdown', e=>{ if(!imgLarge.classList.contains('hasSrc')) return; if(e.button!==0&&e.pointerType==='mouse') return; e.preventDefault(); drag=true; capWrap.setPointerCapture?.(e.pointerId); const p=bounds(e); sx=p.x; sy=p.y; rect.style.display='block'; Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px'}); });
+  window.addEventListener('pointermove', e=>{ if(!drag) return; const p=bounds(e); rect.style.left=Math.min(p.x,sx)+'px'; rect.style.top=Math.min(p.y,sy)+'px'; rect.style.width=Math.abs(p.x-sx)+'px'; rect.style.height=Math.abs(p.y-sy)+'px'; });
   window.addEventListener('pointerup', ()=>{ drag=false; });
 })();
-
-$('btnSnap').onclick = async ()=>{
-  // Scatta è attivo solo quando shareActive = true (UI già disabilita)
+$('btnSnap').onclick=async()=>{
   if(!shareActive){ logLine('Condivisione non attiva: premi “Condividi”.', true); return; }
   if(!(await verifyUrlOrStop())) return;
-
   await withBusy('Scatto', async ()=>{
-    const vw=video.videoWidth||0, vh=video.videoHeight||0;
-    if(!vw || !vh){ logLine('Stream non pronto (videoWidth=0). Riprova tra 1 secondo.', true); return; }
+    const vw=video.videoWidth||0, vh=video.videoHeight||0; if(!vw||!vh){ logLine('Stream non pronto (videoWidth=0). Riprova tra 1 secondo.', true); return; }
     const c=document.createElement('canvas'); c.width=vw; c.height=vh; c.getContext('2d').drawImage(video,0,0,vw,vh);
-    imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
-    hasShot=true; enable($('btnSave'), true);
+    imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none'; hasShot=true; enable($('btnSave'), true);
     logLine('Scatto eseguito → immagine grande pronta.', true);
   });
 };
-
 function makePayload(){
   if(!imgLarge.classList.contains('hasSrc')) return null;
-  const natW=imgLarge.naturalWidth, natH=imgLarge.naturalHeight;
-  const dispW=imgLarge.clientWidth, dispH=imgLarge.clientHeight;
-  const rx=parseFloat(rect.style.left)||0, ry=parseFloat(rect.style.top)||0;
-  const rw=parseFloat(rect.style.width)||0, rh=parseFloat(rect.style.height)||0;
+  const natW=imgLarge.naturalWidth, natH=imgLarge.naturalHeight, dispW=imgLarge.clientWidth, dispH=imgLarge.clientHeight;
+  const rx=parseFloat(rect.style.left)||0, ry=parseFloat(rect.style.top)||0, rw=parseFloat(rect.style.width)||0, rh=parseFloat(rect.style.height)||0;
   const needCrop = rect.style.display!=='none' && rw>2 && rh>2;
-
-  const c=document.createElement('canvas'); const ctx=c.getContext('2d');
-  if(!needCrop){
-    c.width=natW; c.height=natH; const tmp=new Image(); tmp.src=imgLarge.src;
-    return new Promise(res=>{ tmp.onload=()=>{ ctx.drawImage(tmp,0,0); res({dataUrl:c.toDataURL('image/png'), crop:null}); }; });
-  }
-  const ax=Math.round(rx*natW/dispW), ay=Math.round(ry*natH/dispH);
-  const aw=Math.round(rw*natW/dispW), ah=Math.round(rh*natH/dispH);
-  c.width=Math.max(1,aw); c.height=Math.max(1,ah); const tmp=new Image(); tmp.src=imgLarge.src;
-  return new Promise(res=>{ tmp.onload=()=>{ ctx.drawImage(tmp,ax,ay,aw,ah,0,0,c.width,c.height); res({dataUrl:c.toDataURL('image/png'), crop:{x:ax,y:ay,w:aw,h:ah,naturalW:natW,naturalH:natH}}); }; });
+  const c=document.createElement('canvas'); const ctx=c.getContext('2d'); const tmp=new Image(); tmp.src=imgLarge.src;
+  return new Promise(res=>{ tmp.onload=()=>{ if(!needCrop){ c.width=natW; c.height=natH; ctx.drawImage(tmp,0,0); res({dataUrl:c.toDataURL('image/png'), crop:null}); return; }
+    const ax=Math.round(rx*natW/dispW), ay=Math.round(ry*natH/dispH), aw=Math.round(rw*natW/dispW), ah=Math.round(rh*natH/dispH);
+    c.width=Math.max(1,aw); c.height=Math.max(1,ah); ctx.drawImage(tmp,ax,ay,aw,ah,0,0,c.width,c.height); res({dataUrl:c.toDataURL('image/png'), crop:{x:ax,y:ay,w:aw,h:ah,naturalW:natW,naturalH:natH}}); }; });
 }
-
-$('btnSave').onclick = async ()=>{
+$('btnSave').onclick=async()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   if(!hasShot){ alert('Fai prima uno scatto'); return; }
   if(!(await verifyUrlOrStop())) return;
-
   await withBusy('Salvataggio scatto', async ()=>{
-    const payload = await makePayload(); if(!payload){ logLine('Nessuna immagine.'); return; }
+    const payload=await makePayload(); if(!payload){ logLine('Nessuna immagine.'); return; }
     const u=(addr.value||'').trim();
-    const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-capture',label:(payload.crop?'FRAME_CROP':'FRAME_FULL')},crop:payload.crop}});
-    if(!sv.ok) throw new Error(sv.error||'Errore salvataggio');
-    logLine('PNG salvato: '+sv.name+' sha='+sv.sha256, true);
+    const label=(payload.crop?'FRAME_CROP':'FRAME_FULL');
+    const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,finalUrl:u,sourceMeta:{provider:'screen-capture',label:label},crop:payload.crop}});
+    if(!sv.ok) throw new Error(sv.error||'Errore salvataggio'); logLine('PNG salvato: '+sv.name+' sha='+sv.sha256, true);
   });
 };
 
-/* =======================
-   TERMINA
-   ======================= */
-$('btnFinish').onclick = async ()=>{
+/* Termina */
+$('btnFinish').onclick=async()=>{
   if(!SID){ alert('Nessuna sessione'); return; }
   await withBusy('Termina certificazione (ZIP + invio)', async ()=>{
-    const q='mode=finish'
-      +'&t='+encodeURIComponent(TOKEN||'')
-      +'&id='+encodeURIComponent(SID)
-      +($('rcpts').value?('&to='+encodeURIComponent($('rcpts').value)):'')
-      + '&subj='+encodeURIComponent(window._SUBJ_DEFAULT||'Web Evidence')
-      +'&pecMode='+encodeURIComponent(document.getElementById('pecMode').value);
-    const js=await GET(q);
-    if(!js.ok) throw new Error(js.error||'Errore finish');
-
-    setUIState('finished'); // blocco definitivo
-    $('btnFinish').disabled=true;
-    logLine('FINE CERTIFICAZIONE — vai alla cartella: '+(js.zipUrl||' (apri la cartella della sessione in Drive)'), true);
-    if(js.zipName) logLine('ZIP: '+js.zipName);
-    if(js.zipUrl)  logLine('Link ZIP: '+js.zipUrl);
+    const q='mode=finish'+'&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+($('rcpts').value?('&to='+encodeURIComponent($('rcpts').value)):'')+'&subj='+encodeURIComponent(window._SUBJ_DEFAULT||'Web Evidence')+'&pecMode='+encodeURIComponent(document.getElementById('pecMode').value);
+    const js=await GET(q); if(!js.ok) throw new Error(js.error||'Errore finish');
+    setUIState('finished'); $('btnFinish').disabled=true;
+    logLine('FINE CERTIFICAZIONE — vai alla cartella: '+(js.zipUrl||' (apri la cartella sessione in Drive)'), true);
+    if(js.zipName) logLine('ZIP: '+js.zipName); if(js.zipUrl) logLine('Link ZIP: '+js.zipUrl);
   }, {restore:false});
 };
 </script>
