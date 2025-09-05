@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v15.2.2</title>
+<title>Web Evidence – v15.2.3</title>
 <style>
   :root{--bd:#ddd;--ok:#18a957;--danger:#e11d48}
   *{box-sizing:border-box}
@@ -99,8 +99,12 @@
 </div>
 
 <script>
-/* ===== util ===== */
+/* =======================
+   UTIL / STATO / SERVER
+   ======================= */
+// Selettori
 const $=id=>document.getElementById(id);
+// Log a scorrimento (ultimo in alto)
 function logLine(s, important=false){
   const L=$('logBox');
   const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':'');
@@ -108,7 +112,7 @@ function logLine(s, important=false){
 }
 function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 
-/* ===== query/config ===== */
+// Query string (app/tokens/url)
 const qs=new URLSearchParams(location.search);
 let APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
 if(qs.get('u')) addr.value=qs.get('u');
@@ -117,16 +121,18 @@ if(qs.get('dom')) client.dataset.domain=qs.get('dom');
 if(qs.get('domain')) client.dataset.domain=qs.get('domain');
 if(qs.get('to')) $('rcpts').value=qs.get('to');
 
-/* ===== stato ===== */
-let SID=''; let stream=null; let rafId=null; let lockedShare=false; let hasShot=false;
+// Stato runtime
+let SID=''; let stream=null; let rafId=null; let hasShot=false; let shareActive=false;
 const video=document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
 const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWrap');
 
-/* ===== server ===== */
+// Server helpers
 async function GET(q){ const r=await fetch(APP+(APP.includes('?')?'&':'?')+q); return r.json(); }
 async function POST(b){ const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(b)}); return r.json(); }
 
-/* ===== busy guard (restore opzionale) ===== */
+/* =======================
+   BUSY GUARD + UI STATE
+   ======================= */
 let BUSY=false, PREV_STATE=null;
 function snapshotUIState(){
   return {
@@ -138,23 +144,22 @@ function snapshotUIState(){
 }
 function setUIState(state){
   if(state==='idle'){
-    enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false);
+    enable($('btnFull'), false); enable($('btnAssets'), false);
+    enable($('btnSnap'), false); enable($('btnSave'), false);
     $('btnOpen').style.display='none'; $('btnShare').style.display='none';
   }
   if(state==='started'){
-    // Apri visibile/attivo; Condividi nascosto finché non si apre
+    // Solo "Apri", Full/Asset attivi, Scatta disabilitato finché non condividi
     $('btnOpen').style.display='inline-block'; enable($('btnOpen'), true);
     $('btnShare').style.display='none';
-    enable($('btnFull'), true);  // attivi subito
-    enable($('btnAssets'), true);
-    enable($('btnSnap'), true);  // <— sbloccato già dopo Start
-    enable($('btnSave'), false);
+    enable($('btnFull'), true); enable($('btnAssets'), true);
+    enable($('btnSnap'), false); enable($('btnSave'), false);
   }
   if(state==='shared'){
     enable($('btnFull'), true); enable($('btnAssets'), true);
     enable($('btnSnap'), true); enable($('btnSave'), hasShot);
   }
-  if(state==='locked'){
+  if(state==='locked'){ // share terminata
     enable($('btnSnap'), false); enable($('btnSave'), false);
     enable($('btnFull'), true); enable($('btnAssets'), true);
   }
@@ -184,7 +189,9 @@ async function withBusy(label, fn, opts){
   }
 }
 
-/* ===== anteprima ===== */
+/* =======================
+   ANTEPRIMA (300×300)
+   ======================= */
 function drawPreview(){
   const ctx=thumb.getContext('2d'); const tw=thumb.width, th=thumb.height;
   ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th);
@@ -196,14 +203,16 @@ function drawPreview(){
 }
 (function(){ if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview); setUIState('idle'); })();
 
-/* ===== START ===== */
+/* =======================
+   START (blocco URL)
+   ======================= */
 $('btnStart').onclick = async ()=>{
   if(SID){ logLine('Sessione già attiva.'); return; }
   const cli=client.value.trim(), url=(addr.value||'').trim();
   if(!cli){ alert('Cliente obbligatorio'); return; }
   if(!url){ alert('URL obbligatoria'); return; }
 
-  // blocco immediato anti-manomissione
+  // Anti-manomissione: blocca subito campo URL/Cliente e il pulsante
   $('btnStart').style.opacity=.5; $('btnStart').disabled=true;
   addr.readOnly=true; addr.disabled=true; client.readOnly=true; client.disabled=true;
   logLine('Avvio certificazione…');
@@ -222,21 +231,23 @@ $('btnStart').onclick = async ()=>{
     if(!js.ok) throw new Error(js.error||'Errore avvio');
     SID=js.sessionId;
 
-    // subject auto
+    // Oggetto email auto
     const now=new Date(), pad=n=>('0'+n).slice(-2);
     window._SUBJ_DEFAULT='Web Evidence – '+cli+' – '+host+' – '+now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate())+' '+pad(now.getHours())+':'+pad(now.getMinutes());
 
     logLine('SESSIONE: '+js.base+(js.folderUrl?(' → '+js.folderUrl):''), true);
     if(js.trace) js.trace.forEach(t=>logLine(t));
 
-    // Start → Finish + stato avviato
+    // UI post-start
     $('btnStart').style.display='none';
     $('btnFinish').style.display='inline-block'; $('btnFinish').disabled=false;
-    setUIState('started');  // <— qui abilito anche Scatta
+    setUIState('started'); // Scatta resta disabilitato finché non condividi
   }, {restore:false});
 };
 
-/* ===== Apri / Condividi ===== */
+/* =======================
+   APRI / CONDIVIDI
+   ======================= */
 $('btnOpen').onclick = ()=>{
   const url=(addr.value||'').trim(); if(!url){ alert('URL obbligatoria'); return; }
   window.open(url, '_we_clean_'+Date.now(), 'noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no');
@@ -252,28 +263,31 @@ $('btnShare').onclick = async ()=>{
     await new Promise(r=>video.addEventListener('loadedmetadata', r, {once:true}));
     video.play();
     if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview);
+    shareActive=true;
     logLine('Condivisione attiva (anteprima a sinistra).', true);
 
     const vt = s.getVideoTracks()[0];
     vt.addEventListener('ended', ()=>{
       logLine('Condivisione terminata. Scatto disattivato per questa sessione.', true);
-      lockedShare=true; setUIState('locked');
+      shareActive=false; setUIState('locked');
     });
 
-    enable($('btnSnap'), true);
-    $('btnShare').disabled=true; $('btnShare').classList.add('dim');
-    setUIState('shared');
+    setUIState('shared'); // qui abilito Scatta
   });
 };
 
-/* ===== verifica URL ===== */
+/* =======================
+   VERIFICA URL
+   ======================= */
 async function verifyUrlOrStop(){
   const chk=await GET('mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(addr.value||''));
   if(!chk.ok || chk.mismatch){ logLine('URL variata / verifica fallita. Operazione bloccata.', true); return false; }
   return true;
 }
 
-/* ===== Full page ===== */
+/* =======================
+   FULL PAGE
+   ======================= */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
@@ -301,7 +315,9 @@ $('btnFull').onclick = async ()=>{
   });
 };
 
-/* ===== Asset ===== */
+/* =======================
+   ASSET
+   ======================= */
 $('btnAssets').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
@@ -312,7 +328,9 @@ $('btnAssets').onclick = async ()=>{
   });
 };
 
-/* ===== Fence + Scatta + Salva ===== */
+/* =======================
+   FENCE + SCATTA + SALVA
+   ======================= */
 (function fence(){
   let drag=false,sx=0,sy=0;
   function bounds(e){ const r=capWrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
@@ -332,17 +350,14 @@ $('btnAssets').onclick = async ()=>{
 })();
 
 $('btnSnap').onclick = async ()=>{
-  if(lockedShare){ logLine('Condivisione chiusa: scatto non consentito.', true); return; }
-  // se l'utente non ha ancora condiviso, messaggio chiaro
-  if(!(stream && stream.getVideoTracks().length && stream.getVideoTracks()[0].readyState==='live')){
-    logLine('Condivisione non attiva: premi “Condividi”.', true);
-    return;
-  }
+  // Scatta è attivo solo quando shareActive = true (UI già disabilita)
+  if(!shareActive){ logLine('Condivisione non attiva: premi “Condividi”.', true); return; }
   if(!(await verifyUrlOrStop())) return;
 
   await withBusy('Scatto', async ()=>{
-    const w = video.videoWidth||1920, h = video.videoHeight||1080;
-    const c=document.createElement('canvas'); c.width=w; c.height=h; c.getContext('2d').drawImage(video,0,0,w,h);
+    const vw=video.videoWidth||0, vh=video.videoHeight||0;
+    if(!vw || !vh){ logLine('Stream non pronto (videoWidth=0). Riprova tra 1 secondo.', true); return; }
+    const c=document.createElement('canvas'); c.width=vw; c.height=vh; c.getContext('2d').drawImage(video,0,0,vw,vh);
     imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
     hasShot=true; enable($('btnSave'), true);
     logLine('Scatto eseguito → immagine grande pronta.', true);
@@ -382,7 +397,9 @@ $('btnSave').onclick = async ()=>{
   });
 };
 
-/* ===== Termina ===== */
+/* =======================
+   TERMINA
+   ======================= */
 $('btnFinish').onclick = async ()=>{
   if(!SID){ alert('Nessuna sessione'); return; }
   await withBusy('Termina certificazione (ZIP + invio)', async ()=>{
@@ -395,13 +412,12 @@ $('btnFinish').onclick = async ()=>{
     const js=await GET(q);
     if(!js.ok) throw new Error(js.error||'Errore finish');
 
-    // blocco definitivo e log finale
-    setUIState('finished');
-    $('btnFinish').disabled=true;  // esplicito
-    logLine('FINE CERTIFICAZIONE — vai alla cartella: '+(js.zipUrl||' (apri la cartella sessione in Drive)'), true);
+    setUIState('finished'); // blocco definitivo
+    $('btnFinish').disabled=true;
+    logLine('FINE CERTIFICAZIONE — vai alla cartella: '+(js.zipUrl||' (apri la cartella della sessione in Drive)'), true);
     if(js.zipName) logLine('ZIP: '+js.zipName);
     if(js.zipUrl)  logLine('Link ZIP: '+js.zipUrl);
-  }, {restore:false}); // <— NON ripristinare lo stato precedente
+  }, {restore:false});
 };
 </script>
 </body>
