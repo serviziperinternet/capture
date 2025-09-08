@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v15.3.5</title>
+<title>Web Evidence – v15.3.6</title>
 <style>
   :root{--bd:#ddd;--ok:#18a957;--danger:#e11d48}
   *{box-sizing:border-box}
@@ -94,18 +94,29 @@
 </div>
 
 <script>
+/* ---- util ---- */
 const $=id=>document.getElementById(id);
-function logLine(s, important=false){ const L=$('logBox'); const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':''); L.textContent=entry+'\n'+L.textContent; L.scrollTop=0; }
+function logLine(s, important=false){ const L=$('logBox'); if(!L) return; const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':''); L.textContent=entry+'\n'+L.textContent; L.scrollTop=0; }
 function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
+/* 🔎 logga anche gli errori JS non catturati */
+window.addEventListener('error', e=>{ try{ logLine('JS ERROR: '+e.message, true); }catch(_){ } });
+
+/* ---- elementi DOM (⚠️ definiamo le variabili!) ---- */
+const clientEl = $('client');
+const addrEl   = $('addr');
+const rcptsEl  = $('rcpts');
+
+/* ---- querystring ---- */
 const qs=new URLSearchParams(location.search);
-let APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
-if(qs.get('u')) addr.value=qs.get('u');
-if(qs.get('client')) client.value=qs.get('client');
-if(qs.get('dom')) client.dataset.domain=qs.get('dom');
-if(qs.get('domain')) client.dataset.domain=qs.get('domain');
-if(qs.get('to')) $('rcpts').value=qs.get('to');
+let APP   = qs.get('app')||'';
+let TOKEN = qs.get('t')  ||'';
+if(qs.get('u'))      addrEl.value   = qs.get('u');
+if(qs.get('client')) clientEl.value = qs.get('client');
+if(qs.get('dom'))    clientEl.dataset.domain = qs.get('dom');
+if(qs.get('domain')) clientEl.dataset.domain = qs.get('domain');
+if(qs.get('to'))     rcptsEl.value  = qs.get('to');
 
 let SID='', stream=null, rafId=null, hasShot=false, shareActive=false, recording=false;
 let recorder=null, recChunks=[];
@@ -135,7 +146,7 @@ async function POST(b, label='POST'){
   return r.json();
 }
 
-// PING immediato
+/* ---- PING immediato ---- */
 (function(){
   if(!APP){ logLine('APP mancante (aggiungi ?app=URL_WEBAPP all’URL)', true); }
   else {
@@ -218,14 +229,14 @@ function drawPreview(){
 /* -------- flusso pulsanti -------- */
 $('btnStart').onclick = async ()=>{
   if(SID){ logLine('Sessione già attiva.'); return; }
-  const cli=client.value.trim(), url=(addr.value||'').trim();
+  const cli=clientEl.value.trim(), url=(addrEl.value||'').trim();
   if(!cli){ alert('Cliente obbligatorio'); return; }
   if(!url){ alert('URL obbligatoria'); return; }
   $('btnStart').style.opacity=.5; $('btnStart').disabled=true;
-  addr.readOnly=true; addr.disabled=true; client.readOnly=true; client.disabled=true;
+  addrEl.readOnly=true; addrEl.disabled=true; clientEl.readOnly=true; clientEl.disabled=true;
   logLine('Avvio certificazione…');
   await withBusy('Avvio certificazione', async ()=>{
-    const host=(client.dataset.domain||'')||(new URL(url)).hostname.replace(/^www\./,'');
+    const host=(clientEl.dataset.domain||'')||(new URL(url)).hostname.replace(/^www\./,'');
     const js=await GETR('mode=start&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(url)+'&client='+encodeURIComponent(cli)+'&domain='+encodeURIComponent(host)+'&ua='+encodeURIComponent(navigator.userAgent||'')+'&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')+'&lang='+encodeURIComponent(navigator.language||'')+'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)+'&page='+encodeURIComponent(location.href||''), 3, 'START');
     if(!js.ok) throw new Error(js.error||'Errore avvio');
     SID=js.sessionId;
@@ -240,7 +251,7 @@ $('btnStart').onclick = async ()=>{
 };
 
 $('btnOpen').onclick = ()=>{
-  const url=(addr.value||'').trim(); if(!url){ alert('URL obbligatoria'); return; }
+  const url=(addrEl.value||'').trim(); if(!url){ alert('URL obbligatoria'); return; }
   window.open(url, '_we_clean_'+Date.now(), 'noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no');
   logLine('Finestra/pagina aperta.');
   $('btnOpen').style.display='none';
@@ -268,7 +279,7 @@ $('btnShare').onclick = async ()=>{
 
 async function verifyUrlOrStop(){
   try{
-    const nowUrl = (addr.value||'').trim();
+    const nowUrl = (addrEl.value||'').trim();
     if(!nowUrl){ logLine('Verifica URL: campo vuoto', true); return false; }
     const chk=await GETR('mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(nowUrl), 3, 'CHECKURL');
     if(!chk.ok){ logLine('ERRORE verifica URL (server): '+(chk.error||'?'), true); return false; }
@@ -287,7 +298,7 @@ async function verifyUrlOrStop(){
 /* -------- FULL PAGE -------- */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
-  const u=(addr.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
+  const u=(addrEl.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
   await withBusy('Cattura full page', async ()=>{
     let ok = await verifyUrlOrStop(); if(!ok) throw new Error('Verifica URL fallita');
 
@@ -403,9 +414,9 @@ $('btnSave').onclick = async ()=>{
   const ok = await verifyUrlOrStop(); if(!ok) return;
   await withBusy('Salvataggio scatto', async ()=>{
     const payload = await makePayload(); if(!payload){ logLine('Nessuna immagine.'); return; }
-    const u=(addr.value||'').trim();
+    const u=(addrEl.value||'').trim();
     const label=(payload.crop?'FRAME_CROP':'FRAME_FULL');
-    const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screen-capture',label:label},crop:payload.crop}}, 'SAVE(SCATTO)');
+    const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url=u,sourceMeta:{provider:'screen-capture',label:label},crop:payload.crop}}, 'SAVE(SCATTO)');
     if(!sv.ok) throw new Error(sv.error||'Errore salvataggio');
     logLine('PNG salvato: '+sv.name+' sha='+sv.sha256+' (url='+u+'; final='+sv.finalUrl+')', true);
   });
@@ -424,7 +435,7 @@ $('btnRec').onclick = async ()=>{
       recording=false; setUIState('shared'); logLine('REC terminato. Salvataggio in corso…', true);
       const blob = new Blob(recChunks, { type: recorder.mimeType || 'video/webm' });
       const b64 = await blobToDataURL(blob);
-      const u=(addr.value||'').trim();
+      const u=(addrEl.value||'').trim();
       const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:b64,sendEmail:false,meta:{url=u,sourceMeta:{provider:'screen-capture',label:'REC_VIDEO'}}}, 'SAVE(REC)');
       if(!sv.ok) throw new Error(sv.error||'Errore salvataggio video');
       logLine('VIDEO salvato: '+sv.name+' sha='+sv.sha256+' (url='+u+'; final='+sv.finalUrl+')', true);
@@ -439,7 +450,7 @@ function blobToDataURL(blob){ return new Promise((res,rej)=>{ const fr=new FileR
 $('btnFinish').onclick = async ()=>{
   if(!SID){ alert('Nessuna sessione'); return; }
   await withBusy('Termina certificazione (ZIP + invio)', async ()=>{
-    const q='mode=finish'+'&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+($('rcpts').value?('&to='+encodeURIComponent($('rcpts').value)):'')+'&subj='+encodeURIComponent(window._SUBJ_DEFAULT||'Web Evidence')+'&pecMode='+encodeURIComponent(document.getElementById('pecMode').value);
+    const q='mode=finish'+'&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+(rcptsEl.value?('&to='+encodeURIComponent(rcptsEl.value)):'')+'&subj='+encodeURIComponent(window._SUBJ_DEFAULT||'Web Evidence')+'&pecMode='+encodeURIComponent(document.getElementById('pecMode').value);
     const js=await GETR(q, 2, 'FINISH'); if(!js.ok) throw new Error(js.error||'Errore finish');
     setUIState('finished'); $('btnFinish').disabled=true;
     logLine('FINE CERTIFICAZIONE — vai alla cartella: '+(js.zipUrl||' (apri la cartella sessione in Drive)'), true);
