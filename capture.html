@@ -1,1 +1,518 @@
-<!doctype html> <html lang="it"> <head> <meta charset="utf-8" /> <meta name="viewport" content="width=device-width,initial-scale=1" /> <title>Web Evidence – v15.3.7</title> <style> :root{--bd:#ddd;--ok:#18a957;--danger:#e11d48} *{box-sizing:border-box} body{font:14px/1.5 system-ui,Segoe UI,Roboto,Arial;margin:0;color:#111;background:#fff} header{padding:10px;border-bottom:1px solid #eee} .hrow{display:grid;gap:8px;align-items:center} .row1{grid-template-columns:170px 1fr auto} .row2{grid-template-columns:auto auto 220px 1fr} input,button,select{padding:8px;border:1px solid var(--bd);border-radius:10px;background:#fafafa} input[type="url"],input[type="text"]{background:#fff} .success{background:var(--ok)!important;border-color:var(--ok)!important;color:#fff} .danger{background:var(--danger)!important;border-color:var(--danger)!important;color:#fff} button[disabled]{opacity:.55;cursor:not-allowed} .wrap{display:grid;grid-template-columns:320px 1fr;gap:12px;padding:12px} .card{border:1px solid #eee;border-radius:12px;background:#fff} .card h3{margin:0;padding:10px 12px;border-bottom:1px solid #f3f4f4;font-size:13px;font-weight:700} .side{padding:12px} #thumb{width:300px;height:300px;display:block;background:#000;border:1px dashed #ccc;border-radius:10px} .mut{color:#666} .controls{display:flex;flex-direction:column;gap:10px;padding:12px} .controls .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center} .dim{opacity:.6} #logWrap{padding:0 12px 12px} #logBox{height:260px;border:1px solid #eee;border-radius:10px;padding:10px;overflow:auto;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;background:#fafafa;white-space:pre-wrap} .capCard{grid-column:2} .cap-wrap{position:relative;padding:12px;overflow:auto;border-top:1px solid #f3f4f6;min-height:300px} #imgLarge{max-width:100%;display:none;border-radius:12px;border:1px solid #eee;background:#000} #imgLarge.hasSrc{display:block} #rect{position:absolute;border:2px dashed #fff;display:none;pointer-events:none} </style> </head> <body> <header> <div class="hrow row1"> <input id="client" placeholder="Cliente…" /> <input id="addr" type="url" placeholder="https://…" /> <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end"> <button id="btnStart" class="success" type="button">Inizia certificazione</button> <button id="btnFinish" class="danger" type="button" style="display:none">Termina certificazione</button> </div> </div> <div class="hrow row2" style="margin-top:8px"> <button id="btnOpen" type="button" disabled class="dim" style="display:none">Apri sito in finestra</button> <button id="btnShare" type="button" disabled class="dim" style="display:none">Condividi</button> <select id="pecMode" title="Modalità invio PEC"> <option value="normal" selected>PEC normale</option> <option value="key">PEC via KEY</option> <option value="auto">PEC auto</option> </select> <input id="rcpts" placeholder="Destinatari PEC/email (virgola per più indirizzi)" /> </div> </header> <div class="wrap"> <div class="card side"> <h3>Anteprima LIVE (300×300)</h3> <canvas id="thumb" width="300" height="300" aria-label="Anteprima"></canvas> <div class="mut" style="margin-top:8px">1) Inizia → 2) Apri → 3) Condividi</div> </div> <div class="card"> <h3>Controlli</h3> <div class="controls" id="controlsBox"> <div class="row"> <button id="btnFull" type="button" disabled class="dim">Cattura full page</button> <button id="btnAssets" type="button" disabled class="dim">Scarica asset</button> </div> <div class="row"> <button id="btnSnap" type="button" disabled class="dim">Scatta</button> <button id="btnSave" type="button" disabled class="dim">Salva</button> <button id="btnRec" type="button" disabled class="dim">REC</button> <button id="btnStop" type="button" disabled class="dim">STOP</button> </div> </div> <div id="logWrap"> <h3 style="border:none;padding:6px 0 6px 0;margin:0">Log</h3> <div id="logBox"></div> </div> </div> <div class="card capCard"> <h3>Finestra di cattura (scatto)</h3> <div class="cap-wrap" id="capWrap"> <img id="imgLarge" alt="Scatto"/> <div id="rect"></div> </div> </div> </div> <script> /* ===== util ===== */ const $=id=>document.getElementById(id); function logLine(s, important=false){ const L=$('logBox'); if(!L) return; const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':''); L.textContent=entry+'\n'+L.textContent; L.scrollTop=0; } function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); } const sleep = ms => new Promise(r=>setTimeout(r,ms)); window.addEventListener('error', e=>{ try{ logLine('JS ERROR: '+e.message, true); }catch(_){ } }); /* ===== elementi ===== */ const clientEl=$('client'), addrEl=$('addr'), rcptsEl=$('rcpts'); const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWrap'); const video=document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true; let APP='', TOKEN=''; let SID='', stream=null, rafId=null, hasShot=false, shareActive=false, recording=false; let recorder=null, recChunks=[]; /* ===== helper fetch ===== */ function appUrl(){ return APP || ''; } async function GETR(q, retries=3, label='GET'){ const url = appUrl() + (appUrl().includes('?')?'&':'?') + q; logLine('→ '+label+': '+url); for(let i=0;i<retries;i++){ try{ const r=await fetch(url,{method:'GET',cache:'no-store',redirect:'follow'}); return await r.json(); } catch(e){ if(i===retries-1){ logLine(label+' FAILED ('+(e&&e.message||e)+')', true); throw e; } await sleep(400*(i+1)); } } } async function POST(b, label='POST'){ const url=appUrl(); logLine('→ '+label+': '+url); const r=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(b),cache:'no-store',redirect:'follow'}); return r.json(); } /* ===== init (prefill + ping) ===== */ function prefillFromQS(){ const qs=new URLSearchParams(location.search); logLine('Raw query: '+(location.search||'?'), true); const g=(k,alts=[])=>{ for(const key of [k,...alts]){ const v=qs.get(key); if(v!==null) return v; } return null; }; APP = g('app',['APP','a']) || ''; TOKEN = g('t',['token']) || ''; const U = g('u',['url','addr']); const CLIENT = g('client',['c','cli']); const TO = g('to',['email','rcpt','rcpts']); const DOMAIN = g('dom',['domain','host']); logLine('Params found: app='+(APP? '✔️' : '—')+', t='+(TOKEN? '✔️':'—')+', u='+(U? '✔️':'—')+', client='+(CLIENT? '✔️':'—')+', to='+(TO? '✔️':'—')+', dom='+(DOMAIN? '✔️':'—')); if(U) addrEl.value = U; if(CLIENT) clientEl.value = CLIENT; if(DOMAIN) clientEl.dataset.domain = DOMAIN; if(TO) rcptsEl.value = TO; if(!APP){ logLine('APP mancante (aggiungi ?app=URL_WEBAPP all’URL)', true); } else { logLine('APP='+APP); } } function ping(){ if(!APP) return; GETR('mode=cfg',1,'PING').then(_=>logLine('PING OK (cfg ricevuto)')).catch(e=>{ logLine('PING FAIL: '+(e.message||e), true); logLine('Suggerimento: WebApp “Anyone”, anonimo, disabilita ad-block.'); }); } document.addEventListener('DOMContentLoaded', ()=>{ prefillFromQS(); if(!thumb.getContext){ logLine('Canvas non supportato', true); } drawPreview(); setUIState('idle'); ping(); }); /* ===== UI state ===== */ let BUSY=false, PREV_STATE=null; function snapshotUIState(){ return {full:!$('btnFull').disabled, assets:!$('btnAssets').disabled, snap:!$('btnSnap').disabled, save:!$('btnSave').disabled, rec:!$('btnRec').disabled, stop:!$('btnStop').disabled, open:!$('btnOpen').disabled&&$('btnOpen').style.display!=='none', share:!$('btnShare').disabled&&$('btnShare').style.display!=='none', finish:!$('btnFinish').disabled&&$('btnFinish').style.display!=='none'}; } function setUIState(state){ if(state==='idle'){ enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false); enable($('btnRec'), false); enable($('btnStop'), false); $('btnOpen').style.display='none'; $('btnShare').style.display='none'; } if(state==='started'){ $('btnOpen').style.display='inline-block'; enable($('btnOpen'), true); $('btnShare').style.display='none'; enable($('btnFull'), true); enable($('btnAssets'), true); enable($('btnSnap'), false); enable($('btnSave'), false); enable($('btnRec'), false); enable($('btnStop'), false); } if(state==='shared'){ enable($('btnFull'), true); enable($('btnAssets'), true); enable($('btnSnap'), true); enable($('btnSave'), hasShot); enable($('btnRec'), !recording); enable($('btnStop'), recording); } if(state==='recording'){ enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false); enable($('btnRec'), false); enable($('btnStop'), true); } if(state==='locked'){ enable($('btnSnap'), false); enable($('btnSave'), false); enable($('btnFull'), true); enable($('btnAssets'), true); enable($('btnRec'), false); enable($('btnStop'), false); } if(state==='finished'){ document.querySelectorAll('button').forEach(b=> b.disabled=true); } } async function withBusy(label, fn, opts){ const restore=!(opts&&opts.restore===false); if(BUSY){ logLine('ATTESA PER: '+BUSY); return; } BUSY=label; PREV_STATE=snapshotUIState(); document.querySelectorAll('button').forEach(b=> b.disabled=true); logLine('ATTESA PER: '+label, true); try{ const res=await fn(); logLine('PRONTO: '+label, true); return res; } catch(e){ logLine('ERRORE in '+label+': '+(e.message||e), true); } finally{ BUSY=false; if(restore && PREV_STATE){ enable($('btnFull'), !!PREV_STATE.full); enable($('btnAssets'), !!PREV_STATE.assets); enable($('btnSnap'), !!PREV_STATE.snap); enable($('btnSave'), !!PREV_STATE.save); enable($('btnRec'), !!PREV_STATE.rec); enable($('btnStop'), !!PREV_STATE.stop); if($('btnOpen').style.display!=='none') $('btnOpen').disabled=!PREV_STATE.open; if($('btnShare').style.display!=='none') $('btnShare').disabled=!PREV_STATE.share; if($('btnFinish').style.display!=='none') $('btnFinish').disabled=!PREV_STATE.finish; } } } /* ===== anteprima ===== */ function drawPreview(){ try{ const ctx=thumb.getContext('2d'); if(!ctx) return; const tw=thumb.width, th=thumb.height; ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th); if(!(video.videoWidth && video.videoHeight)){ rafId=requestAnimationFrame(drawPreview); return; } const vw=video.videoWidth, vh=video.videoHeight; const br=vw/vh; let dw=tw, dh=tw/br; if(dh>th){ dh=th; dw=th*br; } const dx=(tw-dw)/2, dy=(th-dh)/2; ctx.drawImage(video, dx, dy, dw, dh); rafId=requestAnimationFrame(drawPreview); }catch(e){ logLine('Preview ERR: '+e.message, true); } } /* ===== flusso ===== */ $('btnStart').onclick = async ()=>{ if(SID){ logLine('Sessione già attiva.'); return; } const cli=clientEl.value.trim(), url=(addrEl.value||'').trim(); if(!cli){ alert('Cliente obbligatorio'); return; } if(!url){ alert('URL obbligatoria'); return; } $('btnStart').style.opacity=.5; $('btnStart').disabled=true; addrEl.readOnly=true; addrEl.disabled=true; clientEl.readOnly=true; clientEl.disabled=true; logLine('Avvio certificazione…'); await withBusy('Avvio certificazione', async ()=>{ const host=(clientEl.dataset.domain||'')||(new URL(url)).hostname.replace(/^www\./,''); const js=await GETR('mode=start&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(url)+'&client='+encodeURIComponent(cli)+'&domain='+encodeURIComponent(host)+'&ua='+encodeURIComponent(navigator.userAgent||'')+'&tz='+encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone||'')+'&lang='+encodeURIComponent(navigator.language||'')+'&vw='+innerWidth+'&vh='+innerHeight+'&sw='+screen.width+'&sh='+screen.height+'&dpr='+(window.devicePixelRatio||1)+'&page='+encodeURIComponent(location.href||''), 3, 'START'); if(!js.ok) throw new Error(js.error||'Errore avvio'); SID=js.sessionId; const now=new Date(), pad=n=>('0'+n).slice(-2); window._SUBJ_DEFAULT='Web Evidence – '+cli+' – '+host+' – '+now.getFullYear()+'-'+pad(now.getMonth()+1)+'-'+pad(now.getDate())+' '+pad(now.getHours())+':'+pad(now.getMinutes()); logLine('SESSIONE: '+js.base+(js.folderUrl?(' → '+js.folderUrl):''), true); if(js.trace) js.trace.forEach(t=>logLine(t)); $('btnStart').style.display='none'; $('btnFinish').style.display='inline-block'; $('btnFinish').disabled=false; setUIState('started'); }, {restore:false}); }; $('btnOpen').onclick = ()=>{ const url=(addrEl.value||'').trim(); if(!url){ alert('URL obbligatoria'); return; } window.open(url, '_we_clean_'+Date.now(), 'noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no'); logLine('Finestra/pagina aperta.'); $('btnOpen').style.display='none'; $('btnShare').style.display='inline-block'; enable($('btnShare'), true); }; $('btnShare').onclick = async ()=>{ await withBusy('Condivisione schermo', async ()=>{ const s = await navigator.mediaDevices.getDisplayMedia({video:{frameRate:30,displaySurface:'browser',preferCurrentTab:true},audio:false}); stream = s; video.srcObject = s; await new Promise(r=>video.addEventListener('loadeddata', r, {once:true})); await video.play(); if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview); shareActive=true; logLine('Condivisione attiva (anteprima a sinistra).', true); const vt = s.getVideoTracks()[0]; vt.addEventListener('ended', ()=>{ logLine('Condivisione terminata. Scatto/REC disattivati per questa sessione.', true); shareActive=false; recording=false; setUIState('locked'); }); setUIState('shared'); $('btnShare').disabled=true; $('btnShare').classList.add('dim'); }, {restore:false}); }; async function verifyUrlOrStop(){ try{ const nowUrl = (addrEl.value||'').trim(); if(!nowUrl){ logLine('Verifica URL: campo vuoto', true); return false; } const chk=await GETR('mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(nowUrl), 3, 'CHECKURL'); if(!chk.ok){ logLine('ERRORE verifica URL (server): '+(chk.error||'?'), true); return false; } if(chk.mismatch){ logLine('URL variata / verifica fallita.\nOrig='+chk.orig+'\nNow ='+chk.now+'\nNOTE: controllo anti-manomissione attivo.', true); return false; } logLine('Verifica URL OK.\nOrig='+chk.orig+'\nNow ='+chk.now); return true; }catch(e){ logLine('ERRORE verifica URL (rete/CORS): '+(e.message||e)+'\nAPP='+APP+'\nSuggerimenti: incognito, disabilita ad-block, WebApp "Anyone".', true); return false; } } /* FULL PAGE */ $('btnFull').onclick = async ()=>{ if(!SID){ alert('Avvia certificazione'); return; } const u=(addrEl.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; } await withBusy('Cattura full page', async ()=>{ let ok = await verifyUrlOrStop(); if(!ok) throw new Error('Verifica URL fallita'); logLine('SM 1920×1240 in corso…'); let sm1=await GETR('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240', 2, 'SM'); if(!sm1.ok) throw new Error(sm1.error||'SM 1240'); let sv1=await POST({authToken:TOKEN,sid:SID,dataUrl:sm1.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920x1240'}}}, 'SAVE(SM1240)'); logLine('Salvato: '+sv1.name+' sha='+sv1.sha256, true); logLine('SM 1920×full in corso…'); let sm2=await GETR('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920xfull', 2, 'SM'); if(!sm2.ok) throw new Error(sm2.error||'SM full'); let sv2=await POST({authToken:TOKEN,sid:SID,dataUrl:sm2.dataUrl,sendEmail:false,meta:{url=u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920xfull'}}}, 'SAVE(SMfull)'); logLine('Salvato: '+sv2.name+' sha='+sv2.sha256, true); logLine('PSI final screenshot…'); let psi=await GETR('mode=psi&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u), 1, 'PSI'); if(psi.ok && psi.dataUrl){ let sv3=await POST({authToken:TOKEN,sid:SID,dataUrl:psi.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'psi',label:'PSI_FINAL'}}}, 'SAVE(PSI)'); logLine('PSI salvato: '+sv3.name+' sha='+sv3.sha256, true); }else{ logLine('PSI non disponibile.'); } }); }; /* Fence + Scatta + Salva */ (function fence(){ let drag=false,sx=0,sy=0; function bounds(e){ const r=capWrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; } capWrap.addEventListener('pointerdown', e=>{ if(!imgLarge.classList.contains('hasSrc')) return; if(e.button!==0 && e.pointerType==='mouse') return; e.preventDefault(); drag=true; capWrap.setPointerCapture?.(e.pointerId); const p=bounds(e); sx=p.x; sy=p.y; rect.style.display='block'; Object.assign(rect.style,{left:sx+'px',top:sy+'px',width:'0px',height:'0px'}); }); window.addEventListener('pointermove', e=>{ if(!drag) return; const p=bounds(e); rect.style.left=Math.min(p.x,sx)+'px'; rect.style.top=Math.min(p.y,sy)+'px'; rect.style.width=Math.abs(p.x-sx)+'px'; rect.style.height=Math.abs(p.y-sy)+'px'; }); window.addEventListener('pointerup', ()=>{ drag=false; }); })(); function isBlank(canvas){ try{ const ctx=canvas.getContext('2d'); const a=ctx.getImageData(0,0,Math.min(10,canvas.width||1),Math.min(10,canvas.height||1)).data; for(let i=0;i<a.length;i+=4){ if(a[i]+a[i+1]+a[i+2]>0) return false; } }catch(_){ } return true; } async function ensureVideoReady(){ for(let i=0;i<25;i++){ if(video.videoWidth>0 && video.videoHeight>0){ await new Promise(r=>requestAnimationFrame(r)); await new Promise(r=>requestAnimationFrame(r)); return true; } await sleep(120);} return false; } $('btnSnap').onclick = async ()=>{ const vw=video.videoWidth, vh=video.videoHeight; logLine('Click SCATTA (shareActive='+shareActive+', '+vw+'×'+vh+')'); await withBusy('Scatto', async ()=>{ if(!shareActive) throw new Error('Condivisione non attiva'); const ok = await verifyUrlOrStop(); if(!ok) throw new Error('Verifica URL fallita'); const ready = await ensureVideoReady(); if(!ready) throw new Error('Stream non pronto'); let w=video.videoWidth||1, h=video.videoHeight||1; const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d'); let used='drawImage'; try{ ctx.drawImage(video,0,0,w,h); }catch(e){ used='drawImage_err:'+e; } if(isBlank(c)){ try{ const track=stream.getVideoTracks()[0]; const cap=new ImageCapture(track); const bmp=await cap.grabFrame(); w=bmp.width; h=bmp.height; c.width=w; c.height=h; ctx.drawImage(bmp,0,0); used='ImageCapture.grabFrame'; }catch(e){ throw new Error('Fallback grabFrame fallito: '+e.message); } } imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none'; hasShot=true; enable($('btnSave'), true); logLine('Scatto eseguito ('+used+') → immagine grande pronta.', true); }); }; function makePayload(){ if(!imgLarge.classList.contains('hasSrc')) return null; const natW=imgLarge.naturalWidth, natH=imgLarge.naturalHeight; const dispW=imgLarge.clientWidth, dispH=imgLarge.clientHeight; const rx=parseFloat(rect.style.left)||0, ry=parseFloat(rect.style.top)||0; const rw=parseFloat(rect.style.width)||0, rh=parseFloat(rect.style.height)||0; const needCrop = rect.style.display!=='none' && rw>2 && rh>2; const c=document.createElement('canvas'); const ctx=c.getContext('2d'); const tmp=new Image(); tmp.src=imgLarge.src; return new Promise(res=>{ tmp.onload=()=>{ if(!needCrop){ c.width=natW; c.height=natH; ctx.drawImage(tmp,0,0); res({dataUrl:c.toDataURL('image/png'), crop:null}); return; } const ax=Math.round(rx*natW/dispW), ay=Math.round(ry*natH/dispH); const aw=Math.round(rw*natW/dispW), ah=Math.round(rh*natH/dispH); c.width=Math.max(1,aw); c.height=Math.max(1,ah); ctx.drawImage(tmp,ax,ay,aw,ah,0,0,c.width,c.height); res({dataUrl:c.toDataURL('image/png'), crop:{x:ax,y:ay,w:aw,h:ah,naturalW:natW,naturalH:natH}}); }; }); } $('btnSave').onclick = async ()=>{ if(!SID){ alert('Avvia certificazione'); return; } if(!hasShot){ alert('Fai prima uno scatto'); return; } const ok = await verifyUrlOrStop(); if(!ok) return; await withBusy('Salvataggio scatto', async ()=>{ const payload = await makePayload(); if(!payload){ logLine('Nessuna immagine.'); return; } const u=(addrEl.value||'').trim(); const label=(payload.crop?'FRAME_CROP':'FRAME_FULL'); const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url=u,sourceMeta:{provider:'screen-capture',label:label},crop:payload.crop}}, 'SAVE(SCATTO)'); if(!sv.ok) throw new Error(sv.error||'Errore salvataggio'); logLine('PNG salvato: '+sv.name+' sha='+sv.sha256+' (url='+u+'; final='+sv.finalUrl+')', true); }); }; /* REC / STOP */ $('btnRec').onclick = async ()=>{ if(!shareActive){ logLine('Condivisione non attiva: premi “Condividi”.', true); return; } if(recording){ logLine('Registrazione già in corso.'); return; } try{ recChunks=[]; const mt = MediaRecorder.isTypeSupported('video/webm;codecs=vp9') ? 'video/webm;codecs=vp9' : 'video/webm'; recorder = new MediaRecorder(stream, { mimeType: mt, videoBitsPerSecond: 3500000 }); recorder.ondataavailable = e=>{ if(e.data && e.data.size) recChunks.push(e.data); }; recorder.onstart = ()=>{ recording=true; setUIState('recording'); logLine('REC avviato…', true); }; recorder.onstop = async ()=>{ recording=false; setUIState('shared'); logLine('REC terminato. Salvataggio in corso…', true); const blob = new Blob(recChunks, { type: recorder.mimeType || 'video/webm' }); const b64 = await (new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(blob); })); const u=(addrEl.value||'').trim(); const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:b64,sendEmail:false,meta:{url=u,sourceMeta:{provider:'screen-capture',label:'REC_VIDEO'}}}, 'SAVE(REC)'); if(!sv.ok) throw new Error(sv.error||'Errore salvataggio video'); logLine('VIDEO salvato: '+sv.name+' sha='+sv.sha256+' (url='+u+'; final='+sv.finalUrl+')', true); }; recorder.start(); }catch(e){ logLine('ERRORE REC: '+(e.message||e), true); } }; $('btnStop').onclick = ()=>{ if(recorder && recording){ try{ recorder.stop(); }catch(e){ logLine('ERRORE STOP: '+e, true); } }; /* Termina */ $('btnFinish').onclick = async ()=>{ if(!SID){ alert('Nessuna sessione'); return; } await withBusy('Termina certificazione (ZIP + invio)', async ()=>{ const q='mode=finish'+'&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+(rcptsEl.value?('&to='+encodeURIComponent(rcptsEl.value)):'')+'&subj='+encodeURIComponent(window._SUBJ_DEFAULT||'Web Evidence')+'&pecMode='+encodeURIComponent(document.getElementById('pecMode').value); const js=await GETR(q, 2, 'FINISH'); if(!js.ok) throw new Error(js.error||'Errore finish'); setUIState('finished'); $('btnFinish').disabled=true; logLine('FINE CERTIFICAZIONE — vai alla cartella: '+(js.zipUrl||' (apri la cartella sessione in Drive)'), true); if(js.zipName) logLine('ZIP: '+js.zipName); if(js.zipUrl) logLine('Link ZIP: '+js.zipUrl); }, {restore:false}); }; </script> </body> </html>
+/**
+ * Web Evidence – v15.3.5
+ * - Log client/server più dettagliati (CHECK_URL con orig/now/match nel session.log)
+ * - GET/POST front-end con retry e PING iniziale (lato HTML)
+ * - Asset fetch: estensioni corrette, SHA256 e finalUrl
+ * - SM 1920x1240 + 1920xfull + PSI final
+ * - ZIP + PEC relay (se configurato) o MailApp
+ */
+
+function doGet(e){
+  ensureConfig_();
+  var mode=(e && e.parameter && e.parameter.mode)||'';
+  if(!mode){
+    // API only (la UI è servita da GitHub Pages)
+    return HtmlService.createHtmlOutput('Web Evidence API OK');
+  }
+  try{
+    switch(mode){
+      case 'cfg':      return json_(cfgOut_());
+      case 'start':    return json_(start_(e));
+      case 'finish':   return json_(finish_(e));
+      case 'snapshot': return json_(snapshot_(e));
+      case 'sm':       return json_(sm_(e));
+      case 'psi':      return json_(psi_(e));
+      case 'note':     return json_(note_(e));
+      case 'checkUrl': return json_(checkUrl_(e));
+      default:         return json_({ok:false,error:'Unknown mode'});
+    }
+  }catch(err){ return json_({ok:false,error:String(err)}); }
+}
+
+function doPost(e){
+  ensureConfig_();
+  try{
+    var body = e && e.postData && e.postData.contents ? JSON.parse(e.postData.contents) : {};
+    return json_(saveDataUrl_(body));
+  }catch(err){ return json_({ok:false,error:String(err)}); }
+}
+
+/* ===== CONFIG ===== */
+function ensureConfig_(){
+  var props = PropertiesService.getScriptProperties();
+  var ss = null; try{ ss = SpreadsheetApp.getActive(); }catch(_){}
+  if(!ss){
+    var sid = props.getProperty('CONFIG_SHEET_ID');
+    if(sid){ try{ ss = SpreadsheetApp.openById(sid); }catch(_){ } }
+  }
+  if(!ss) return;
+  var sh = ss.getSheetByName('DATA'); if(!sh) return;
+  var rng = sh.getRange(1,1,Math.max(1,sh.getLastRow()),2).getDisplayValues();
+  var map = {};
+  for(var i=0;i<rng.length;i++){
+    var k = String(rng[i][0]||'').trim().toLowerCase();
+    var v = String(rng[i][1]||'').trim();
+    if(!k) continue; map[k]=v;
+  }
+  if(map['key screenshot']) props.setProperty('SM_KEY', map['key screenshot']);
+  if(map['pagespeed api key']) props.setProperty('PSI_KEY', map['pagespeed api key']);
+  if(map['invio email']) props.setProperty('DEFAULT_TO', map['invio email']);
+  if(map['oggetto email']) props.setProperty('DEFAULT_SUBJ', map['oggetto email']);
+  if(map['dominio']) props.setProperty('DEFAULT_DOMAIN', map['dominio']);
+  if(map['token']) props.setProperty('TOKEN', map['token']);
+}
+function cfgOut_(){
+  var p = PropertiesService.getScriptProperties();
+  return { ok:true,
+    defaultTo:p.getProperty('DEFAULT_TO')||'',
+    defaultSubj:p.getProperty('DEFAULT_SUBJ')||'Certificazione',
+    defaultDomain:p.getProperty('DEFAULT_DOMAIN')||'',
+    token:p.getProperty('TOKEN')||'',
+    smKeyPresent:!!(p.getProperty('SM_KEY')||''),
+    psiKeyPresent:!!(p.getProperty('PSI_KEY')||'') };
+}
+
+/* ===== START ===== */
+function start_(e){
+  var trace=[];
+  var url=(e.parameter.u||'').trim();
+  var client=(e.parameter.client||'').trim();
+  if(!url) throw new Error('URL obbligatoria');
+  if(!client) throw new Error('Cliente obbligatorio');
+
+  var domParam=(e.parameter.domain||e.parameter.dom||'').trim();
+  var host=domParam || hostOf_(url) || (PropertiesService.getScriptProperties().getProperty('DEFAULT_DOMAIN')||'') || 'unknown';
+
+  var root=ensureRoot_(); trace.push('Root: '+root.getName());
+  var ts=Utilities.formatDate(new Date(),'Europe/Rome',"yyyy-MM-dd__HH-mm-ss");
+  var base=clientSan_(client)+'__'+host+'__'+ts;
+  var sessName=base, n=1; while(root.getFoldersByName(sessName).hasNext()){ n++; sessName=base+'_'+n; }
+  var sess=root.createFolder(sessName); trace.push('Creata cartella sessione: '+sessName+' ('+driveUrl_(sess)+')');
+
+  var F={};
+  F.info       = ensurePath_(sess,'00_istruzioni');
+  F.asset_html = ensurePath_(sess,'asset/html');
+  F.asset_css  = ensurePath_(sess,'asset/css');
+  F.asset_js   = ensurePath_(sess,'asset/js');
+  F.asset_img  = ensurePath_(sess,'asset/img');
+  F.asset_video= ensurePath_(sess,'asset/video');
+  F.asset_font = ensurePath_(sess,'asset/fonts');
+  F.asset_other= ensurePath_(sess,'asset/other');
+  F.shot_comp  = ensurePath_(sess,'shot/completi');
+  F.shot_crop  = ensurePath_(sess,'shot/scatti_parziali');
+  F.shot_vid   = ensurePath_(sess,'shot/video');
+  F.logs       = ensurePath_(sess,'logs');
+  for(var k in F){ trace.push('Cartella: '+F[k].getName()); }
+
+  var f1=F.info.createFile('README.txt', README_TXT_(url,host,client), MimeType.PLAIN_TEXT);
+  var f2=F.info.createFile('ISTRUZIONI_STRUTTURA.txt', ISTRUZIONI_TXT_(), MimeType.PLAIN_TEXT);
+  var f3=F.info.createFile('FAQ_LEGALE.txt', FAQ_LEGALE_TXT_(), MimeType.PLAIN_TEXT);
+  var f4=F.info.createFile('AVVISO_STREAMING.txt', AVVISO_STREAMING_TXT_(), MimeType.PLAIN_TEXT);
+  trace.push('Creati: README('+f1.getSize()+'B), ISTRUZIONI('+f2.getSize()+'B), FAQ('+f3.getSize()+'B), AVVISO('+f4.getSize()+'B)');
+
+  var manifest={ version:15.35, createdUTC:Utilities.formatDate(new Date(),'UTC',"yyyy-MM-dd'T'HH:mm:ss'Z'"),
+    url:url, host:host, client:client,
+    env:{ ua:e.parameter.ua||'', tz:e.parameter.tz||'', lang:e.parameter.lang||'',
+      vw:e.parameter.vw||'', vh:e.parameter.vh||'', sw:e.parameter.sw||'', sh:e.parameter.sh||'',
+      dpr:e.parameter.dpr||'', page:e.parameter.page||'' } };
+  var mf=sess.createFile('manifest.json', JSON.stringify(manifest,null,2), MimeType.PLAIN_TEXT);
+  trace.push('Creato: manifest.json ('+mf.getSize()+'B)');
+
+  var logFile=F.logs.createFile('session.log','',MimeType.PLAIN_TEXT);
+  logAppend_(logFile,'SESSION_START url='+url+' host='+host+' client='+client);
+  logAppend_(logFile,'CLIENT_INFO ua='+manifest.env.ua+' tz='+manifest.env.tz+' lang='+manifest.env.lang+' vw='+manifest.env.vw+' vh='+manifest.env.vh+' sw='+manifest.env.sw+' sh='+manifest.env.sh+' dpr='+manifest.env.dpr);
+  for(var i=0;i<trace.length;i++) logAppend_(logFile, trace[i]);
+
+  return {ok:true, sessionId:sess.getId(), base:sessName, folderUrl:driveUrl_(sess), trace:trace};
+}
+
+/* ===== CHECK URL ===== */
+function checkUrl_(e){
+  var sid=e.parameter.sid||''; var u=(e.parameter.u||'').trim();
+  if(!sid||!u) return {ok:false,error:'Missing sid/url'};
+  var sess=DriveApp.getFolderById(sid);
+  var it=sess.getFilesByName('manifest.json'); if(!it.hasNext()) return {ok:false,error:'Manifest non trovato'};
+  var mf=JSON.parse(it.next().getBlob().getDataAsString()||'{}');
+  var same=normalizeUrl_(mf.url||'')===normalizeUrl_(u);
+
+  // LOG dettagliato del check
+  try{
+    var logFile=ensureLog_(sess);
+    logAppend_(logFile,'CHECK_URL orig='+ (mf.url||'') +' now='+u+' match='+(same?'1':'0'));
+  }catch(_){}
+
+  return {ok:true, mismatch:!same, orig:(mf.url||''), now:u};
+}
+function normalizeUrl_(u){ try{ return String(u).replace(/\/+$/,''); }catch(_){ return String(u||'').replace(/\/+$/,''); } }
+
+/* ===== FINISH ===== */
+function finish_(e){
+  var id=e.parameter.id; if(!id) throw new Error('Missing id');
+  var sess=DriveApp.getFolderById(id);
+  var logFile=ensureLog_(sess);
+
+  logAppend_(logFile,'CALC_CHECKSUMS_START');
+  var chk=computeChecksumsAll_(sess); sess.createFile('checksums.sha256.txt', chk, MimeType.PLAIN_TEXT);
+  logAppend_(logFile,'CHECKSUMS_OK');
+
+  logAppend_(logFile,'ZIP_BUILD_START');
+  var zipBlob=zipFolderBlob_(sess);
+  var zip=sess.createFile(zipBlob);
+  logAppend_(logFile,'ZIP_OK '+zip.getName()+' size='+zip.getSize()+'B');
+
+  var to=(e.parameter.to||PropertiesService.getScriptProperties().getProperty('DEFAULT_TO')||'').trim();
+  var subj=(e.parameter.subj||PropertiesService.getScriptProperties().getProperty('DEFAULT_SUBJ')||'Certificazione');
+  var pecMode=(e.parameter.pecMode||'normal');
+  if(to){
+    try{
+      if(pecMode==='key'||pecMode==='auto'){ if(hasPECKey_()){ logAppend_(logFile,'INVIO_PEC mode=relay'); sendPECViaKey_(zip,to,subj,sess,logFile); } else { logAppend_(logFile,'INVIO_PEC mode=mailapp (fallback)'); emailZip_(zip,to,subj,logFile); } }
+      else { logAppend_(logFile,'INVIO_PEC mode=mailapp'); emailZip_(zip,to,subj,logFile); }
+    }catch(err){ logAppend_(logFile,'EMAIL_ERR '+err); }
+  }
+  logAppend_(logFile,'SESSION_END');
+  return {ok:true, zipUrl:fileUrl_(zip), zipName:zip.getName()};
+}
+
+/* ===== SNAPSHOT (Scarica asset) ===== */
+function snapshot_(e){
+  var id=e.parameter.id, url=(e.parameter.u||''); if(!id||!url) return {ok:false,error:'Missing id/url'};
+  var sess=DriveApp.getFolderById(id), logFile=ensureLog_(sess);
+  try{
+    var rep=fetchAssetsAll_(url, sess, logFile);
+    logAppend_(logFile, 'SNAPSHOT_SUMMARY found='+rep.found+' saved='+rep.count+' skipped='+rep.skipped+' errors='+rep.errors);
+    return {ok:true, assets:true, count:rep.count};
+  }catch(err){ logAppend_(logFile, 'SNAPSHOT_ERR '+err); return {ok:false,error:String(err)}; }
+}
+
+/* ===== SM / PSI ===== */
+function sm_(e){
+  var url=(e.parameter.u||''); if(!url) return {ok:false,error:'Missing url'};
+  var dim=(e.parameter.dim||'1920xfull'); var data=smFetch_(url,dim);
+  return {ok:true, dataUrl:data.dataUrl, meta:{provider:'screenshotmachine',dimension:dim}};
+}
+function psi_(e){
+  var url=(e.parameter.u||''); if(!url) return {ok:false,error:'Missing url'};
+  var key=PropertiesService.getScriptProperties().getProperty('PSI_KEY')||''; if(!key) return {ok:false,error:'PSI key mancante'};
+  var api='https://www.googleapis.com/pagespeedonline/v5/runPagespeed?url='+encodeURIComponent(url)+'&category=PERFORMANCE&strategy=DESKTOP&key='+encodeURIComponent(key);
+  var r=UrlFetchApp.fetch(api,{followRedirects:true,muteHttpExceptions:true});
+  var code=r.getResponseCode(); if(code>=400) return {ok:false,error:'PSI HTTP '+code};
+  var o=JSON.parse(r.getContentText()); var dataUrl=''; try{ dataUrl=o.lighthouseResult.audits['final-screenshot'].details.data||''; }catch(_){}
+  if(!dataUrl) return {ok:false,error:'No final-screenshot'}; return {ok:true,dataUrl:dataUrl,meta:{provider:'psi'}};
+}
+function smFetch_(url,dim){
+  var key=PropertiesService.getScriptProperties().getProperty('SM_KEY'); if(!key) throw new Error('SM_KEY mancante (DATA → "Key screenshot")');
+  var base=PropertiesService.getScriptProperties().getProperty('SM_BASE')||'https://api.screenshotmachine.com';
+  var q=base+'?key='+encodeURIComponent(key)+'&url='+encodeURIComponent(url)+'&dimension='+encodeURIComponent(dim)+'&cacheLimit=0&format=png';
+  var r=UrlFetchApp.fetch(q,{followRedirects:true,muteHttpExceptions:true});
+  var ct=r.getHeaders()['Content-Type']||''; if(ct.indexOf('image')===-1) throw new Error('SM non-image: '+r.getContentText());
+  var b=r.getBlob(); var b64=Utilities.base64Encode(b.getBytes());
+  return {dataUrl:'data:'+ct+';base64,'+b64};
+}
+
+/* ===== NOTE / SAVE ===== */
+function note_(e){
+  var id=e.parameter.id; if(!id) return {ok:false};
+  var sess=DriveApp.getFolderById(id), logFile=ensureLog_(sess);
+  var msg=(e.parameter.msg||''); logAppend_(logFile, msg); return {ok:true};
+}
+
+function saveDataUrl_(body){
+  var sid=body.sid, dataUrl=body.dataUrl; if(!sid||!dataUrl) return {ok:false,error:'Missing sid/dataUrl'};
+  var sess=DriveApp.getFolderById(sid), logFile=ensureLog_(sess);
+  var meta=body.meta||{}; var isVideo = dataUrl.startsWith('data:video');
+
+  var sourceUrl = String(meta.url||'').trim();
+  var resolved = sourceUrl ? resolveFinalUrlOnly_(sourceUrl) : {finalUrl:''};
+
+  var blob=dataUrlToBlob_(dataUrl);
+  var label=(meta.sourceMeta&&meta.sourceMeta.label)|| (isVideo?'video':'shot');
+  var ext=isVideo?'.webm':'.png';
+  var subPath = pickShotPath_(label, isVideo);
+  var folder=ensurePath_(sess, subPath);
+  var name=ts_()+'__'+label+ext; blob.setName(name);
+  var file=folder.createFile(blob);
+  var sha=sha256Hex_(file.getBlob().getBytes());
+
+  logAppend_(logFile,'SAVE_OK type='+(isVideo?'video':'image')+' path='+subPath+'/'+name+' sha='+sha+' url='+sourceUrl+' final='+resolved.finalUrl);
+  return {ok:true,name:name,sha256:sha,url:fileUrl_(file),finalUrl:resolved.finalUrl};
+}
+function pickShotPath_(label, isVideo){
+  if(isVideo) return 'shot/video';
+  if(/^SM_|^PSI_/i.test(label)) return 'shot/completi';
+  if(/FRAME_FULL/i.test(label)) return 'shot/completi';
+  if(/FRAME_CROP/i.test(label)) return 'shot/scatti_parziali';
+  return 'shot/completi';
+}
+
+/* ===== ASSET FETCH ===== */
+function fetchAssetsAll_(pageUrl, sess, logFile){
+  var res0 = UrlFetchApp.fetch(pageUrl, {followRedirects:true, muteHttpExceptions:true, validateHttpsCertificates:true});
+  var html = res0.getContentText();
+  ensurePath_(sess,'asset/html').createFile('page.html', html, MimeType.HTML);
+  logAppend_(logFile,'ASSET_HTML_SAVED size='+html.length);
+  var base = pageUrl;
+
+  var urls = [];
+  function add(u){
+    try{
+      if(!u||/^data:/i.test(u)) return;
+      var abs=resolveUrl_(base,u);
+      if(abs){ urls.push(abs); }
+    }catch(e){}
+  }
+
+  html.replace(/<img\b[^>]*?(?:src|data-src|data-original|data-lazy)=["']([^"']+)["'][^>]*>/gi, function(_,u){ add(u); return _; });
+  html.replace(/<img\b[^>]*?srcset=["']([^"']+)["'][^>]*>/gi, function(_,set){ set.split(',').forEach(function(p){ var u=(p.trim().split(/\s+/)[0]||''); add(u); }); return _; });
+  html.replace(/<link\b[^>]*rel=["'][^"']*stylesheet[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>/gi, function(_,u){ add(u); return _; });
+  html.replace(/<script\b[^>]*src=["']([^"']+)["'][^>]*><\/script>/gi, function(_,u){ add(u); return _; });
+  html.replace(/<(?:video|audio)\b[^>]*src=["']([^"']+)["'][^>]*>/gi, function(_,u){ add(u); return _; });
+  html.replace(/<source\b[^>]*src=["']([^"']+)["'][^>]*>/gi, function(_,u){ add(u); return _; });
+
+  var styleBlocks=html.match(/<style[^>]*>([\s\S]*?)<\/style>/gi)||[];
+  styleBlocks.forEach(function(b){
+    var css=b.replace(/^<style[^>]*>|<\/style>$/gi,'');
+    extractUrlsFromCss_(css, base).forEach(add);
+  });
+
+  logAppend_(logFile, 'ASSET_FOUND '+urls.length+' url');
+
+  var saved=0, skipped=0, errors=0;
+  function fetchAndSave(u){
+    try{
+      if(/(?:youtube\.com|youtu\.be|vimeo\.com|player\.vimeo\.com|dailymotion\.com)/i.test(u)){
+        skipped++; logAppend_(logFile, 'ASSET_SKIP_STREAM url='+u); return;
+      }
+      var fr = fetchFollowBinary_(u); // {bytes, ct, finalUrl, headers, code}
+      if(fr.code>=400){ errors++; logAppend_(logFile,'ASSET_ERR HTTP '+fr.code+' url='+u); return; }
+
+      var ext = extFromMime_(fr.ct) || sniffExt_(fr.bytes) || extFromDispositionOrUrl_(fr.headers, fr.finalUrl) || '.bin';
+      var sha = sha256Hex_(fr.bytes);
+      var fname = baseNameFromUrl_(fr.finalUrl||u, 'asset_'+('0000'+(saved+1)).slice(-4)+'_'+sha.slice(0,8)+ext, ext);
+
+      var blob = Utilities.newBlob(fr.bytes, fr.ct||contentTypeFromExt_(ext), fname);
+
+      var dest = 'asset/other';
+      if(/\.(png|jpe?g|gif|webp|svg)$/i.test(ext)) dest='asset/img';
+      else if(/\.css$/i.test(ext)) dest='asset/css';
+      else if(/\.js$/i.test(ext)) dest='asset/js';
+      else if(/\.(woff2?|ttf|otf|eot)$/i.test(ext)) dest='asset/fonts';
+      else if(/\.(mp4|webm|ogg|mp3|wav|m4a)$/i.test(ext)) dest='asset/video';
+
+      var savedFile = ensurePath_(sess, dest).createFile(blob);
+      saved++;
+      logAppend_(logFile, 'ASSET_OK dest='+dest+' name='+fname+' ct='+(fr.ct||'?')+' size='+fr.bytes.length+' sha='+sha+' url='+u+' final='+fr.finalUrl);
+
+      if(/\.css$/i.test(ext)){
+        try{
+          var cssText = savedFile.getBlob().getDataAsString();
+          var more = extractUrlsFromCss_(cssText, fr.finalUrl||u);
+          if(more && more.length){
+            logAppend_(logFile, 'ASSET_CSS_FOUND '+more.length+' refs in '+fname);
+            more.forEach(function(mu){ fetchAndSave(mu); });
+          }
+        }catch(errCss){ logAppend_(logFile, 'ASSET_CSS_PARSE_ERR '+String(errCss).slice(0,150)+' file='+fname); }
+      }
+    }catch(err){
+      errors++; logAppend_(logFile, 'ASSET_ERR EXC '+String(err).slice(0,200)+' url='+u);
+    }
+  }
+
+  urls.forEach(fetchAndSave);
+  if(skipped){ logAppend_(logFile, 'ASSET_SKIPPED streaming-hosts='+skipped); }
+  return {found:urls.length, count:saved, skipped:skipped, errors:errors};
+}
+
+/* ===== helper redirect/bytes ===== */
+function resolveFinalUrlOnly_(u){
+  var max=10, cur=u;
+  for(var i=0;i<max;i++){
+    var r=UrlFetchApp.fetch(cur,{muteHttpExceptions:true,followRedirects:false,validateHttpsCertificates:true});
+    var c=r.getResponseCode();
+    if(c>=300 && c<400){
+      var loc=(r.getHeaders()['Location']||r.getHeaders()['location']||'').trim(); if(!loc) break;
+      cur=resolveUrl_(cur,loc); continue;
+    }
+    break;
+  }
+  return {finalUrl:cur};
+}
+function fetchFollowBinary_(u){
+  var max=10, cur=u, lastR=null;
+  for(var i=0;i<max;i++){
+    var r=UrlFetchApp.fetch(cur,{muteHttpExceptions:true,followRedirects:false,validateHttpsCertificates:true});
+    lastR=r;
+    var c=r.getResponseCode();
+    if(c>=300 && c<400){
+      var loc=(r.getHeaders()['Location']||r.getHeaders()['location']||'').trim();
+      if(!loc) break;
+      cur=resolveUrl_(cur,loc);
+      continue;
+    }
+    break;
+  }
+  var bytes=lastR.getBlob().getBytes();
+  var ct=lastR.getHeaders()['Content-Type']||'';
+  return {bytes:bytes, ct:ct, finalUrl:cur, headers:lastR.getHeaders(), code:lastR.getResponseCode()};
+}
+
+/* ===== ISTRUZIONI ===== */
+function README_TXT_(url,host,client){
+  return [
+'WEB EVIDENCE — GUIDA (v15.3.5)',
+'URL iniziale: '+url,
+'Dominio: '+host,
+'Cliente: '+client,
+'',
+'PASSI:',
+'1) Inizia certificazione (blocca URL/Cliente, crea struttura).',
+'2) Apri sito in finestra → Condividi.',
+'3) Cattura full page (SM 1920×1240 + SM full + PSI final).',
+'4) Scatta → Salva (crop opzionale).',
+'5) REC → STOP (video webm).',
+'6) Scarica asset (html/css/js/img/fonts/video). Log per-URL con SHA e finalUrl.',
+'7) Termina (SHA256 + ZIP + invio PEC/email).',
+'',
+'Antimanomissione: ad ogni operazione verifichiamo l’URL rispetto al manifest. La URL della tab condivisa non è accessibile via API: usiamo blocco URL + log + hash.'
+  ].join('\n');
+}
+function ISTRUZIONI_TXT_(){
+  return [
+'STRUTTURA CARTELLE',
+'asset/html   → HTML sorgente',
+'asset/css    → CSS esterni (segue url() e @import)',
+'asset/js     → JavaScript esterni',
+'asset/img    → Immagini (png/jpg/webp/svg, …)',
+'asset/fonts  → Webfont (woff/woff2/ttf/otf/eot)',
+'asset/video  → Media diretti (mp4/webm/ogg, …)',
+'asset/other  → Altri file',
+'shot/completi         → Screenshot completi (SM/PSI + frame intero)',
+'shot/scatti_parziali  → Ritagli/fence',
+'shot/video            → Registrazioni schermo (webm)',
+'logs/                 → Registri (session.log con SHA + URL finali + CHECK_URL)'
+  ].join('\n');
+}
+function FAQ_LEGALE_TXT_(){
+  return [
+'FAQ LEGALI',
+'Q) Come provate la pagina?','A) URL iniziale nel manifest; prima di ogni azione eseguiamo checkUrl. Se cambia, blocco + log.',
+'Q) Integrità?','A) SHA256 per ogni file; elenco checksums + ZIP.',
+'Q) Perché non verificate la URL della tab condivisa?','A) Le API di cattura non espongono l’URL della tab. Per questo vincoliamo l’URL inserita, logghiamo ogni check e alleghiamo hash.'
+  ].join('\n');
+}
+function AVVISO_STREAMING_TXT_(){
+  return [
+'AVVISO STREAMING',
+'Contenuti da piattaforme streaming (YouTube/Vimeo/Dailymotion) non vengono scaricati (TOS).',
+'Gli asset diretti con URL pubblico vengono archiviati con estensione corretta, SHA e URL finale.'
+  ].join('\n');
+}
+
+/* ===== UTILITY ===== */
+function ensureRoot_(){ var rootName = PropertiesService.getScriptProperties().getProperty('ROOT_FOLDER') || 'WebEvidence'; var it = DriveApp.getFoldersByName(rootName); return it.hasNext()? it.next() : DriveApp.createFolder(rootName); }
+function ensureLog_(sess){ var it=ensurePath_(sess,'logs').getFilesByName('session.log'); return it.hasNext()? it.next() : ensurePath_(sess,'logs').createFile('session.log','',MimeType.PLAIN_TEXT); }
+function getChildFolder_(root, name){ var it=root.getFoldersByName(name); return it.hasNext()? it.next() : root.createFolder(name); }
+function ensurePath_(root, path){ var parts=String(path).split('/'); var cur=root; for(var i=0;i<parts.length;i++){ if(!parts[i]) continue; cur=getChildFolder_(cur, parts[i]); } return cur; }
+function driveUrl_(folder){ return 'https://drive.google.com/drive/folders/'+folder.getId(); }
+function fileUrl_(file){ return 'https://drive.google.com/file/d/'+file.getId()+'/view'; }
+function json_(obj){ return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON); }
+function ts_(){ return Utilities.formatDate(new Date(),'UTC',"yyyyMMdd'T'HHmmss'Z'"); }
+function hostOf_(u){ try{ return String(u).replace(/^[a-z]+:\/\//i,'').split('/')[0].replace(/^www\./,''); }catch(e){ return ''; } }
+function clientSan_(s){ return String(s||'').replace(/[^a-z0-9._-]+/gi,'_').slice(0,80) || 'client'; }
+function sha256Hex_(bytes){ var dig=Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes); return dig.map(function(b){return ('0'+(b&255).toString(16)).slice(-2)}).join(''); }
+function logAppend_(logFile, line){ var ex=''; try{ ex=logFile.getBlob().getDataAsString(); }catch(_){}
+  logFile.setContent(ex+'['+Utilities.formatDate(new Date(),'Europe/Rome','HH:mm:ss')+'] '+line+'\n'); }
+function dataUrlToBlob_(dataUrl){ var comma=dataUrl.indexOf(','); var meta=dataUrl.substring(5,comma); var b64=dataUrl.substring(comma+1); var bytes=Utilities.base64Decode(b64); var ct=meta.split(';')[0]||'application/octet-stream'; return Utilities.newBlob(bytes, ct, 'file'); }
+function computeChecksumsAll_(folder){
+  var out=[], it=folder.getFiles();
+  while(it.hasNext()){ var f=it.next(); var sha=sha256Hex_(f.getBlob().getBytes()); out.push(sha+'  '+f.getName()); }
+  var fit=folder.getFolders();
+  while(fit.hasNext()){ var sub=fit.next(); var subTxt=computeChecksumsAll_(sub); if(subTxt){ out.push(subTxt); } }
+  return out.join('\n');
+}
+function zipFolderBlob_(folder){
+  var blobs=[], seen={};
+  function unique(name){ if(!seen[name]){ seen[name]=1; return name; }
+    var i=++seen[name]; var p=name.lastIndexOf('/'); var dir=p>=0?name.slice(0,p+1):''; var base=p>=0?name.slice(p+1):name;
+    var dot=base.lastIndexOf('.'); var b0=dot>=0?base.slice(0,dot):base; var ext=dot>=0?base.slice(dot):''; return dir+b0+' ('+i+')'+ext; }
+  function walk(f, pref){
+    var itf=f.getFiles(); while(itf.hasNext()){ var file=itf.next(); var b=file.getBlob(); var name=pref+file.getName(); b.setName(unique(name)); blobs.push(b); }
+    var it=f.getFolders(); while(it.hasNext()){ var sub=it.next(); walk(sub, pref+sub.getName()+'/'); }
+  }
+  walk(folder, folder.getName()+'/'); return Utilities.zip(blobs, folder.getName()+'.zip');
+}
+function resolveUrl_(base, href){
+  href=String(href||'').trim(); base=String(base||'').trim(); if(!href) return '';
+  if(/^[a-z]+:\/\//i.test(href)) return href;
+  if(/^\/\//.test(href)){ var proto=(base.match(/^([a-z]+):/i)||['http:'])[0]; return proto+href; }
+  var m=base.match(/^([a-z]+):\/\/([^\/?#]+)(\/[^?#]*)?/i); if(!m) return href;
+  var proto=m[1]+'://', host=m[2], path=m[3]||'/';
+  if(href[0]==='/') return proto+host+href;
+  var dir=path.replace(/[^\/]*$/,''); var full=proto+host+dir+href;
+  var seg=full.split('/'), out=[]; for(var i=0;i<seg.length;i++){ var p=seg[i]; if(p==='..'){ if(out.length>3) out.pop(); } else if(p==='.' || (p===''&&i>2)){} else out.push(p); }
+  var result=out.join('/'); if(!/^https?:\/\//i.test(result)) result=proto+host+'/'+out.slice(3).join('/'); return result;
+}
+function baseNameFromUrl_(u, fallback, ext){
+  try{
+    var p=decodeURIComponent(u.split('#')[0].split('?')[0]); var seg=p.split('/'); var last=seg[seg.length-1]||'';
+    if(!last){ return fallback; }
+    if(ext && last.toLowerCase().endsWith(ext.toLowerCase())) return last;
+    return last + (ext||'');
+  }catch(_){ return fallback; }
+}
+function extFromDispositionOrUrl_(headers, url){
+  try{
+    var cd=headers['Content-Disposition']||headers['content-disposition']||'';
+    var m=cd.match(/filename\*?=(?:UTF-8'')?"?([^";]+)"?/i);
+    if(m){ var fn=m[1]; var me=fn.match(/\.([a-z0-9]+)$/i); if(me) return '.'+me[1].toLowerCase(); }
+  }catch(_){}
+  var m2=String(url||'').toLowerCase().match(/\.([a-z0-9]+)(?:\?|#|$)/);
+  return m2?('.'+m2[1]):'';
+}
+function contentTypeFromExt_(ext){
+  ext=(ext||'').toLowerCase();
+  var map={'.png':'image/png','.jpg':'image/jpeg','.jpeg':'image/jpeg','.gif':'image/gif','.webp':'image/webp','.svg':'image/svg+xml','.css':'text/css','.js':'application/javascript','.woff':'font/woff','.woff2':'font/woff2','.ttf':'font/ttf','.otf':'font/otf','.eot':'application/vnd.ms-fontobject','.mp4':'video/mp4','.webm':'video/webm','.ogg':'video/ogg','.mp3':'audio/mpeg','.wav':'audio/wav','.m4a':'audio/mp4'};
+  return map[ext]||'application/octet-stream';
+}
+function sniffExt_(bytes){
+  if(!bytes||!bytes.length) return '';
+  function starts(arr){ for(var i=0;i<arr.length;i++){ if(bytes[i]!==arr[i]) return false; } return true; }
+  try{
+    if(starts([0x89,0x50,0x4E,0x47])) return '.png';
+    if(starts([0xFF,0xD8,0xFF])) return '.jpg';
+    if(String.fromCharCode(bytes[0],bytes[1],bytes[2],bytes[3])==='GIF8') return '.gif';
+    if(String.fromCharCode(bytes[0],bytes[1],bytes[2],bytes[3])==='RIFF' && String.fromCharCode(bytes[8],bytes[9],bytes[10],bytes[11])==='WEBP') return '.webp';
+    var head = Utilities.newBlob(bytes.slice(0,64)).getDataAsString();
+    if(/^<\?xml|^\s*<svg/i.test(head)) return '.svg';
+    if(String.fromCharCode(bytes[4],bytes[5],bytes[6],bytes[7])==='ftyp') return '.mp4';
+    if(starts([0x1A,0x45,0xDF,0xA3])) return '.webm';
+    if(String.fromCharCode(bytes[0],bytes[1],bytes[2])==='ID3' || (bytes[0]===0xFF && (bytes[1]&0xE0)===0xE0)) return '.mp3';
+    if(String.fromCharCode(bytes[0],bytes[1],bytes[2],bytes[3])==='OggS') return '.ogg';
+    if(String.fromCharCode(bytes[0],bytes[1],bytes[2],bytes[3])==='RIFF' && String.fromCharCode(bytes[8],bytes[9],bytes[10],bytes[11])==='WAVE') return '.wav';
+    if(String.fromCharCode(bytes[0],bytes[1],bytes[2],bytes[3])==='wOFF') return '.woff';
+    if(String.fromCharCode(bytes[0],bytes[1],bytes[2],bytes[3])==='wOF2') return '.woff2';
+    if(bytes[0]===0x00 && bytes[1]===0x01 && bytes[2]===0x00 && bytes[3]===0x00) return '.ttf';
+    if(String.fromCharCode(bytes[0],bytes[1],bytes[2],bytes[3])==='OTTO') return '.otf';
+  }catch(_){}
+  return '';
+}
+
+/* ===== EMAIL / PEC ===== */
+function emailZip_(zipFile,to,subj,logFile){
+  try{
+    var name=PropertiesService.getScriptProperties().getProperty('MAIL_FROM_NAME')||'Web Evidence';
+    MailApp.sendEmail({to:to,subject:subj,name:name,body:'Pacchetto prove: '+fileUrl_(zipFile),attachments:[zipFile.getBlob()]});
+    logAppend_(logFile,'EMAIL_OK to='+to);
+  }catch(err){ logAppend_(logFile,'EMAIL_ERR '+err); throw err; }
+}
+function hasPECKey_(){ var p=PropertiesService.getScriptProperties(); return !!(p.getProperty('PEC_ENDPOINT')&&p.getProperty('PEC_KEY')&&p.getProperty('PEC_SENDER')); }
+function sendPECViaKey_(zipFile,to,subj,sess,logFile){
+  var p=PropertiesService.getScriptProperties();
+  var endpoint=p.getProperty('PEC_ENDPOINT')||'', apiKey=p.getProperty('PEC_KEY')||'', sender=p.getProperty('PEC_SENDER')||'', fromName=p.getProperty('PEC_FROM_NAME')||'Web Evidence';
+  if(!endpoint||!apiKey||!sender) throw new Error('PEC_ENDPOINT/PEC_KEY/PEC_SENDER non configurati');
+  var payload={ from:sender, to:to.split(',').map(function(s){return s.trim();}).filter(String),
+    subject:subj, html:'<p>Web Evidence – Bundle: '+sess.getName()+'</p><p>ZIP: '+fileUrl_(zipFile)+'</p>',
+    attachments:[{ filename:zipFile.getName(), contentType:'application/zip', content:Utilities.base64Encode(zipFile.getBlob().getBytes()) }] };
+  var r=UrlFetchApp.fetch(endpoint,{method:'post',muteHttpExceptions:true,contentType:'application/json',headers:{'Authorization':'Bearer '+apiKey,'X-From-Name':fromName},payload:JSON.stringify(payload)});
+  var code=r.getResponseCode(); logAppend_(logFile,'PEC_HTTP '+code+' endpoint='+endpoint);
+  if(code>=400) throw new Error('PEC API HTTP '+code+': '+r.getContentText().slice(0,300));
+}
