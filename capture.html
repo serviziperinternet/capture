@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Web Evidence – v15.3.6</title>
+<title>Web Evidence – v15.3.7</title>
 <style>
   :root{--bd:#ddd;--ok:#18a957;--danger:#e11d48}
   *{box-sizing:border-box}
@@ -27,9 +27,9 @@
   .controls .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
   .dim{opacity:.6}
   #logWrap{padding:0 12px 12px}
-  #logBox{height:240px;border:1px solid #eee;border-radius:10px;padding:10px;overflow:auto;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;background:#fafafa;white-space:pre-wrap}
+  #logBox{height:260px;border:1px solid #eee;border-radius:10px;padding:10px;overflow:auto;font:12px/1.55 ui-monospace,Menlo,Consolas,monospace;background:#fafafa;white-space:pre-wrap}
   .capCard{grid-column:2}
-  .cap-wrap{position:relative;padding:12px;overflow:auto;border-top:1px solid #f3f4f6;min-height:280px}
+  .cap-wrap{position:relative;padding:12px;overflow:auto;border-top:1px solid #f3f4f6;min-height:300px}
   #imgLarge{max-width:100%;display:none;border-radius:12px;border:1px solid #eee;background:#000}
   #imgLarge.hasSrc{display:block}
   #rect{position:absolute;border:2px dashed #fff;display:none;pointer-events:none}
@@ -94,71 +94,84 @@
 </div>
 
 <script>
-/* ---- util ---- */
+/* ===== util ===== */
 const $=id=>document.getElementById(id);
 function logLine(s, important=false){ const L=$('logBox'); if(!L) return; const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':''); L.textContent=entry+'\n'+L.textContent; L.scrollTop=0; }
 function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
-
-/* 🔎 logga anche gli errori JS non catturati */
 window.addEventListener('error', e=>{ try{ logLine('JS ERROR: '+e.message, true); }catch(_){ } });
 
-/* ---- elementi DOM (⚠️ definiamo le variabili!) ---- */
-const clientEl = $('client');
-const addrEl   = $('addr');
-const rcptsEl  = $('rcpts');
-
-/* ---- querystring ---- */
-const qs=new URLSearchParams(location.search);
-let APP   = qs.get('app')||'';
-let TOKEN = qs.get('t')  ||'';
-if(qs.get('u'))      addrEl.value   = qs.get('u');
-if(qs.get('client')) clientEl.value = qs.get('client');
-if(qs.get('dom'))    clientEl.dataset.domain = qs.get('dom');
-if(qs.get('domain')) clientEl.dataset.domain = qs.get('domain');
-if(qs.get('to'))     rcptsEl.value  = qs.get('to');
-
-let SID='', stream=null, rafId=null, hasShot=false, shareActive=false, recording=false;
-let recorder=null, recChunks=[];
-const video=document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
+/* ===== elementi ===== */
+const clientEl=$('client'), addrEl=$('addr'), rcptsEl=$('rcpts');
 const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWrap');
+const video=document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
 
-/* -------- fetch helpers con log/ retry + ping -------- */
+let APP='', TOKEN=''; let SID='', stream=null, rafId=null, hasShot=false, shareActive=false, recording=false; let recorder=null, recChunks=[];
+
+/* ===== helper fetch ===== */
 function appUrl(){ return APP || ''; }
-
 async function GETR(q, retries=3, label='GET'){
   const url = appUrl() + (appUrl().includes('?')?'&':'?') + q;
   logLine(`→ ${label}: ${url}`);
   for(let i=0;i<retries;i++){
-    try{
-      const r = await fetch(url, {method:'GET', cache:'no-store', redirect:'follow'});
-      return await r.json();
-    }catch(e){
-      if(i===retries-1){ logLine(`${label} FAILED (${e&&e.message||e})`, true); throw e; }
-      await sleep(400*(i+1));
-    }
+    try{ const r=await fetch(url,{method:'GET',cache:'no-store',redirect:'follow'}); return await r.json(); }
+    catch(e){ if(i===retries-1){ logLine(`${label} FAILED (${e&&e.message||e})`, true); throw e; } await sleep(400*(i+1)); }
   }
 }
 async function POST(b, label='POST'){
-  const url = appUrl();
-  logLine(`→ ${label}: ${url}`);
-  const r = await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(b),cache:'no-store',redirect:'follow'});
+  const url=appUrl(); logLine(`→ ${label}: ${url}`);
+  const r=await fetch(url,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(b),cache:'no-store',redirect:'follow'});
   return r.json();
 }
 
-/* ---- PING immediato ---- */
-(function(){
-  if(!APP){ logLine('APP mancante (aggiungi ?app=URL_WEBAPP all’URL)', true); }
-  else {
-    logLine('APP='+APP);
-    GETR('mode=cfg', 1, 'PING').then(_=>logLine('PING OK (cfg ricevuto)')).catch(e=>{
-      logLine('PING FAIL: '+(e.message||e), true);
-      logLine('Suggerimento: "Who has access"=Anyone; prova in incognito senza estensioni.');
-    });
-  }
-})();
+/* ===== init (prefill + ping) ===== */
+function prefillFromQS(){
+  const qs=new URLSearchParams(location.search);
+  // log raw
+  logLine('Raw query: '+(location.search||'?'), true);
 
-/* -------- UI state machine -------- */
+  // accetta alias comuni
+  const g=(k,alts=[])=>{ for(const key of [k,...alts]){ const v=qs.get(key); if(v!==null) return v; } return null; };
+
+  APP   = g('app',['APP','a']) || '';
+  TOKEN = g('t',['token']) || '';
+  const U       = g('u',['url','addr']);
+  const CLIENT  = g('client',['c','cli']);
+  const TO      = g('to',['email','rcpt','rcpts']);
+  const DOMAIN  = g('dom',['domain','host']);
+
+  logLine('Params found: app='+(APP? '✔️' : '—')+', t='+(TOKEN? '✔️':'—')+', u='+(U? '✔️':'—')+', client='+(CLIENT? '✔️':'—')+', to='+(TO? '✔️':'—')+', dom='+(DOMAIN? '✔️':'—'));
+
+  if(U) addrEl.value = U;
+  if(CLIENT) clientEl.value = CLIENT;
+  if(DOMAIN) clientEl.dataset.domain = DOMAIN;
+  if(TO) rcptsEl.value = TO;
+
+  if(!APP){
+    logLine('APP mancante (aggiungi ?app=URL_WEBAPP all’URL)', true);
+  }else{
+    logLine('APP='+APP);
+  }
+}
+function ping(){
+  if(!APP) return;
+  GETR('mode=cfg',1,'PING')
+    .then(_=>logLine('PING OK (cfg ricevuto)'))
+    .catch(e=>{
+      logLine('PING FAIL: '+(e.message||e), true);
+      logLine('Suggerimento: WebApp “Anyone”, prova in anonimo, disabilita ad-block.');
+    });
+}
+
+document.addEventListener('DOMContentLoaded', ()=>{
+  prefillFromQS();
+  if(!thumb.getContext){ logLine('Canvas non supportato nel browser', true); }
+  drawPreview();
+  setUIState('idle');
+  ping();
+});
+
+/* ===== UI state ===== */
 let BUSY=false, PREV_STATE=null;
 function snapshotUIState(){ return {full:!$('btnFull').disabled, assets:!$('btnAssets').disabled, snap:!$('btnSnap').disabled, save:!$('btnSave').disabled, rec:!$('btnRec').disabled, stop:!$('btnStop').disabled, open:!$('btnOpen').disabled&&$('btnOpen').style.display!=='none', share:!$('btnShare').disabled&&$('btnShare').style.display!=='none', finish:!$('btnFinish').disabled&&$('btnFinish').style.display!=='none'}; }
 function setUIState(state){
@@ -214,19 +227,21 @@ async function withBusy(label, fn, opts){
   }
 }
 
-/* -------- anteprima live -------- */
+/* ===== anteprima ===== */
 function drawPreview(){
-  const ctx=thumb.getContext('2d'); const tw=thumb.width, th=thumb.height;
-  ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th);
-  if(!(video.videoWidth && video.videoHeight)){ rafId=requestAnimationFrame(drawPreview); return; }
-  const vw=video.videoWidth, vh=video.videoHeight;
-  const br=vw/vh; let dw=tw, dh=tw/br; if(dh>th){ dh=th; dw=th*br; } const dx=(tw-dw)/2, dy=(th-dh)/2;
-  ctx.drawImage(video, dx, dy, dw, dh);
-  rafId=requestAnimationFrame(drawPreview);
+  try{
+    const ctx=thumb.getContext('2d'); if(!ctx) return;
+    const tw=thumb.width, th=thumb.height;
+    ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th);
+    if(!(video.videoWidth && video.videoHeight)){ rafId=requestAnimationFrame(drawPreview); return; }
+    const vw=video.videoWidth, vh=video.videoHeight;
+    const br=vw/vh; let dw=tw, dh=tw/br; if(dh>th){ dh=th; dw=th*br; } const dx=(tw-dw)/2, dy=(th-dh)/2;
+    ctx.drawImage(video, dx, dy, dw, dh);
+    rafId=requestAnimationFrame(drawPreview);
+  }catch(e){ logLine('Preview ERR: '+e.message, true); }
 }
-(function(){ if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview); setUIState('idle'); })();
 
-/* -------- flusso pulsanti -------- */
+/* ===== flusso pulsanti essenziali (resto identico alla 15.3.6) ===== */
 $('btnStart').onclick = async ()=>{
   if(SID){ logLine('Sessione già attiva.'); return; }
   const cli=clientEl.value.trim(), url=(addrEl.value||'').trim();
@@ -258,6 +273,7 @@ $('btnOpen').onclick = ()=>{
   $('btnShare').style.display='inline-block';
   enable($('btnShare'), true);
 };
+
 $('btnShare').onclick = async ()=>{
   await withBusy('Condivisione schermo', async ()=>{
     const s = await navigator.mediaDevices.getDisplayMedia({video:{frameRate:30,displaySurface:'browser',preferCurrentTab:true},audio:false});
@@ -295,37 +311,34 @@ async function verifyUrlOrStop(){
   }
 }
 
-/* -------- FULL PAGE -------- */
-$('btnFull').onclick = async ()=>{
+/* (…resto: Full page, Scatta/Salva, REC/STOP, Termina — invariati dalla 15.3.6) */
+
+// FULL PAGE
+$('btnFull').onclick = async ()=>{ /* identica a 15.3.6 */ 
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=(addrEl.value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
   await withBusy('Cattura full page', async ()=>{
     let ok = await verifyUrlOrStop(); if(!ok) throw new Error('Verifica URL fallita');
-
     logLine('SM 1920×1240 in corso…');
     let sm1=await GETR('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240', 2, 'SM');
     if(!sm1.ok) throw new Error(sm1.error||'SM 1240');
     let sv1=await POST({authToken:TOKEN,sid:SID,dataUrl:sm1.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920x1240'}}}, 'SAVE(SM1240)');
     logLine('Salvato: '+sv1.name+' sha='+sv1.sha256, true);
-
     logLine('SM 1920×full in corso…');
     let sm2=await GETR('mode=sm&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920xfull', 2, 'SM');
     if(!sm2.ok) throw new Error(sm2.error||'SM full');
     let sv2=await POST({authToken:TOKEN,sid:SID,dataUrl:sm2.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920xfull'}}}, 'SAVE(SMfull)');
     logLine('Salvato: '+sv2.name+' sha='+sv2.sha256, true);
-
     logLine('PSI final screenshot…');
     let psi=await GETR('mode=psi&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u), 1, 'PSI');
     if(psi.ok && psi.dataUrl){
       let sv3=await POST({authToken:TOKEN,sid:SID,dataUrl:psi.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'psi',label:'PSI_FINAL'}}}, 'SAVE(PSI)');
       logLine('PSI salvato: '+sv3.name+' sha='+sv3.sha256, true);
-    }else{
-      logLine('PSI non disponibile.');
-    }
+    }else{ logLine('PSI non disponibile.'); }
   });
 };
 
-/* -------- Fence + Scatta + Salva -------- */
+// Fence + Scatta + Salva
 (function fence(){
   let drag=false,sx=0,sy=0;
   function bounds(e){ const r=capWrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
@@ -343,22 +356,8 @@ $('btnFull').onclick = async ()=>{
   });
   window.addEventListener('pointerup', ()=>{ drag=false; });
 })();
-
-async function ensureVideoReady(){
-  for(let i=0;i<25;i++){
-    if(video.videoWidth>0 && video.videoHeight>0) { await new Promise(r=>requestAnimationFrame(r)); await new Promise(r=>requestAnimationFrame(r)); return true; }
-    await sleep(120);
-  }
-  return false;
-}
-function isBlank(canvas){
-  try{
-    const ctx=canvas.getContext('2d');
-    const a=ctx.getImageData(0,0,Math.min(10,canvas.width||1),Math.min(10,canvas.height||1)).data;
-    for(let i=0;i<a.length;i+=4){ if(a[i]+a[i+1]+a[i+2]>0) return false; }
-  }catch(_){}
-  return true;
-}
+function isBlank(canvas){ try{ const ctx=canvas.getContext('2d'); const a=ctx.getImageData(0,0,Math.min(10,canvas.width||1),Math.min(10,canvas.height||1)).data; for(let i=0;i<a.length;i+=4){ if(a[i]+a[i+1]+a[i+2]>0) return false; } }catch(_){ } return true; }
+async function ensureVideoReady(){ for(let i=0;i<25;i++){ if(video.videoWidth>0 && video.videoHeight>0){ await new Promise(r=>requestAnimationFrame(r)); await new Promise(r=>requestAnimationFrame(r)); return true; } await sleep(120);} return false;}
 
 $('btnSnap').onclick = async ()=>{
   const vw=video.videoWidth, vh=video.videoHeight;
@@ -367,21 +366,13 @@ $('btnSnap').onclick = async ()=>{
     if(!shareActive) throw new Error('Condivisione non attiva');
     const ok = await verifyUrlOrStop(); if(!ok) throw new Error('Verifica URL fallita');
     const ready = await ensureVideoReady(); if(!ready) throw new Error('Stream non pronto');
-
     let w=video.videoWidth||1, h=video.videoHeight||1;
     const c=document.createElement('canvas'); c.width=w; c.height=h; const ctx=c.getContext('2d');
     let used='drawImage';
     try{ ctx.drawImage(video,0,0,w,h); }catch(e){ used='drawImage_err:'+e; }
-
     if(isBlank(c)){
-      try{
-        const track=stream.getVideoTracks()[0];
-        const cap=new ImageCapture(track);
-        const bmp=await cap.grabFrame();
-        w=bmp.width; h=bmp.height; c.width=w; c.height=h;
-        ctx.drawImage(bmp,0,0);
-        used='ImageCapture.grabFrame';
-      }catch(e){ throw new Error('Fallback grabFrame fallito: '+e.message); }
+      try{ const track=stream.getVideoTracks()[0]; const cap=new ImageCapture(track); const bmp=await cap.grabFrame(); w=bmp.width; h=bmp.height; c.width=w; c.height=h; ctx.drawImage(bmp,0,0); used='ImageCapture.grabFrame'; }
+      catch(e){ throw new Error('Fallback grabFrame fallito: '+e.message); }
     }
     imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
     hasShot=true; enable($('btnSave'), true);
@@ -397,15 +388,7 @@ function makePayload(){
   const rw=parseFloat(rect.style.width)||0, rh=parseFloat(rect.style.height)||0;
   const needCrop = rect.style.display!=='none' && rw>2 && rh>2;
   const c=document.createElement('canvas'); const ctx=c.getContext('2d'); const tmp=new Image(); tmp.src=imgLarge.src;
-  return new Promise(res=>{
-    tmp.onload=()=>{
-      if(!needCrop){ c.width=natW; c.height=natH; ctx.drawImage(tmp,0,0); res({dataUrl:c.toDataURL('image/png'), crop:null}); return; }
-      const ax=Math.round(rx*natW/dispW), ay=Math.round(ry*natH/dispH);
-      const aw=Math.round(rw*natW/dispW), ah=Math.round(rh*natH/dispH);
-      c.width=Math.max(1,aw); c.height=Math.max(1,ah); ctx.drawImage(tmp,ax,ay,aw,ah,0,0,c.width,c.height);
-      res({dataUrl:c.toDataURL('image/png'), crop:{x:ax,y:ay,w:aw,h:ah,naturalW:natW,naturalH:natH}});
-    };
-  });
+  return new Promise(res=>{ tmp.onload=()=>{ if(!needCrop){ c.width=natW; c.height=natH; ctx.drawImage(tmp,0,0); res({dataUrl:c.toDataURL('image/png'), crop:null}); return; } const ax=Math.round(rx*natW/dispW), ay=Math.round(ry*natH/dispH); const aw=Math.round(rw*natW/dispW), ah=Math.round(rh*natH/dispH); c.width=Math.max(1,aw); c.height=Math.max(1,ah); ctx.drawImage(tmp,ax,ay,aw,ah,0,0,c.width,c.height); res({dataUrl:c.toDataURL('image/png'), crop:{x:ax,y:ay,w:aw,h:ah,naturalW:natW,naturalH:natH}}); }; });
 }
 
 $('btnSave').onclick = async ()=>{
@@ -416,13 +399,13 @@ $('btnSave').onclick = async ()=>{
     const payload = await makePayload(); if(!payload){ logLine('Nessuna immagine.'); return; }
     const u=(addrEl.value||'').trim();
     const label=(payload.crop?'FRAME_CROP':'FRAME_FULL');
-    const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url=u,sourceMeta:{provider:'screen-capture',label:label},crop:payload.crop}}, 'SAVE(SCATTO)');
+    const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screen-capture',label:label},crop:payload.crop}}, 'SAVE(SCATTO)');
     if(!sv.ok) throw new Error(sv.error||'Errore salvataggio');
     logLine('PNG salvato: '+sv.name+' sha='+sv.sha256+' (url='+u+'; final='+sv.finalUrl+')', true);
   });
 };
 
-/* -------- REC / STOP -------- */
+/* REC/STOP e FINISH identici alla 15.3.6 */
 $('btnRec').onclick = async ()=>{
   if(!shareActive){ logLine('Condivisione non attiva: premi “Condividi”.', true); return; }
   if(recording){ logLine('Registrazione già in corso.'); return; }
@@ -446,7 +429,6 @@ $('btnRec').onclick = async ()=>{
 $('btnStop').onclick = ()=>{ if(recorder && recording){ try{ recorder.stop(); }catch(e){ logLine('ERRORE STOP: '+e, true); } } };
 function blobToDataURL(blob){ return new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(blob); }); }
 
-/* -------- Termina -------- */
 $('btnFinish').onclick = async ()=>{
   if(!SID){ alert('Nessuna sessione'); return; }
   await withBusy('Termina certificazione (ZIP + invio)', async ()=>{
