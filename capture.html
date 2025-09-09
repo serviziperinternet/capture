@@ -99,16 +99,48 @@ function logLine(s, important=false){ const L=$('logBox'); const entry='['+(new 
 function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
-/* === Query === */
-const qs=new URLSearchParams(location.search);
-let APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
-if(qs.get('u')) $('addr').value=qs.get('u');
-if(qs.get('client')) $('client').value=qs.get('client');
-if(qs.get('dom')) $('client').dataset.domain=qs.get('dom');
-if(qs.get('domain')) $('client').dataset.domain=qs.get('domain');
-if(qs.get('to')) $('rcpts').value=qs.get('to');
-if(qs.get('pec')) $('pecMode').value=qs.get('pec');
-if (APP && APP.indexOf('/a/macros/') >= 0) { logLine('ATTENZIONE: endpoint /a/macros/ → correggo in /macros/'); APP = APP.replace('/a/macros/','/macros/'); }
+/* === Query — PREFILL ROBUSTO (vecchio + nuovo) === */
+let APP='', TOKEN='';
+(function prefillNow(){
+  const qs=new URLSearchParams(location.search);
+  const get = k => (qs.has(k) ? (qs.get(k)||'') : '');
+  // legge più alias (retrocompatibile)
+  const u   = get('u')      || get('url')   || '';
+  const cli = get('client') || get('c')     || '';
+  const to  = get('to')     || get('email') || '';
+  const dom = get('domain') || get('dom')   || '';
+  const pec = get('pec')    || '';
+
+  APP   = get('app') || '';
+  TOKEN = get('t')   || '';
+
+  // correzione endpoint /a/macros/ → /macros/
+  if (APP && APP.indexOf('/a/macros/') >= 0) {
+    APP = APP.replace('/a/macros/','/macros/');
+  }
+
+  // scrive sia via DOM che via "global id" (come la versione che ti funzionava)
+  try{ document.getElementById('addr').value   = u; }catch(_){}
+  try{ if (window.addr)   window.addr.value   = u; }catch(_){}
+  try{ document.getElementById('client').value = cli; }catch(_){}
+  try{ if (window.client) window.client.value = cli; }catch(_){}
+  try{ document.getElementById('rcpts').value  = to; }catch(_){}
+  try{ if (window.rcpts) window.rcpts.value   = to; }catch(_){}
+  try{ if(dom) document.getElementById('client').dataset.domain = dom; }catch(_){}
+  try{ if(pec) document.getElementById('pecMode').value = pec; }catch(_){}
+
+  // log chiaro dell’autofill
+  logLine('AUTOFILL → url="'+(u||'(vuota)')+'", client="'+(cli||'(vuoto)')+'", to="'+(to||'(vuoto)')+'"');
+})();
+// secondo pass dopo il parsing completo del DOM (in caso qualche browser sia lento)
+document.addEventListener('DOMContentLoaded', ()=> prefillNowSafe());
+setTimeout(()=> prefillNowSafe(), 0);
+function prefillNowSafe(){
+  // rilegge dai campi già riempiti e assicura coerenza
+  if(window.addr && !window.addr.value && $('addr')) window.addr.value = $('addr').value;
+  if(window.client && !window.client.value && $('client')) window.client.value = $('client').value;
+  if(window.rcpts && !window.rcpts.value && $('rcpts')) window.rcpts.value = $('rcpts').value;
+}
 
 /* === Stato === */
 let SID='', stream=null, rafId=null, hasShot=false, shareActive=false, recording=false;
@@ -232,50 +264,40 @@ $('btnShare').onclick = async ()=>{
   }, {restore:false});
 };
 
-/* === verifica URL via helper GET (stessa pipeline di start) === */
-
+/* === verifica URL (GET checkUrl) === */
 async function verifyUrlOrStop(){
   const rawU = (document.getElementById('addr').value || '').trim();
   const q = 'mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(rawU);
-
-  // (se usi già il mio GET “robusto”, va bene; altrimenti lascialo com’è)
   try{
     const js = await GET(q);
     if(!js || js.ok !== true){
       logLine('CHKURL ERR: risposta non OK dal server', true);
       return false;
     }
-    // Log super esplicito:
     logLine('CHKURL ORIG(raw) = '+js.orig);
     logLine('CHKURL NOW (raw) = '+js.now);
     logLine('CHKURL ORIG(norm)= '+js.origNorm);
     logLine('CHKURL NOW (norm)= '+js.nowNorm);
-
     if(js.mismatch){
       const diffs = Object.keys(js.diff || {}).filter(k => js.diff[k]);
       logLine('URL DIVERGENTE — PARTI DIVERSE: '+(diffs.join(', ')||'(?)'), true);
       return false;
     }
-
     logLine('Verifica URL OK — combaciano (norm)');
     return true;
   }catch(e){
-    // qui NON è mismatch: è errore rete/CORS
     logLine('CHKURL ERR: '+(e && e.message ? e.message : e), true);
     return false;
   }
 }
 
-
-
-/* === full page (SM + SM full + PSI) — con sid per enforcement server === */
+/* === full page (SM + PSI) === */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=($('addr').value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
   await withBusy('Cattura full page', async ()=>{
     let ok = await verifyUrlOrStop();
-    if(ok === false) throw new Error('Verifica URL fallita');
-    if(ok === null)  throw new Error('Verifica URL non raggiungibile (riprovare)');
+    if(ok !== true) throw new Error('Verifica URL fallita');
 
     logLine('SM 1920×1240 in corso…');
     let sm1=await GET('mode=sm&sid='+encodeURIComponent(SID)+'&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240');
@@ -339,7 +361,6 @@ $('btnSnap').onclick = async ()=>{
   await withBusy('Scatto', async ()=>{
     if(!shareActive) throw new Error('Condivisione non attiva');
 
-    // Verifica “morbida”: se rete/CORS non disponibile non blocco lo scatto; bloccherò al salvataggio.
     const vres = await verifyUrlOrStop();
     if(vres === false) throw new Error('Verifica URL fallita (mismatch) — correggi l’URL in alto');
 
@@ -387,7 +408,6 @@ $('btnSave').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   if(!hasShot){ alert('Fai prima uno scatto'); return; }
   await withBusy('Salvataggio scatto', async ()=>{
-    // Verifica “dura”: qui DEVE passare
     const ok = await verifyUrlOrStop();
     if(ok !== true) throw new Error('Verifica URL fallita o non raggiungibile');
 
@@ -414,7 +434,7 @@ $('btnRec').onclick = async ()=>{
       const blob = new Blob(recChunks, { type: recorder.mimeType || 'video/webm' });
       const b64 = await (new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(blob); }));
       const u=($('addr').value||'').trim();
-      const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:b64,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screen-capture',label:'REC_VIDEO'}}});
+      const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:b64,sendEmail:false,meta:{url=u,sourceMeta:{provider:'screen-capture',label:'REC_VIDEO'}}});
       if(!sv.ok) throw new Error(sv.error||'Errore salvataggio video');
       logLine('VIDEO salvato: '+sv.name+' sha='+sv.sha256+' (url='+u+'; final='+sv.finalUrl+')', true);
     };
@@ -423,7 +443,7 @@ $('btnRec').onclick = async ()=>{
 };
 $('btnStop').onclick = ()=>{ if(recorder && recording){ try{ recorder.stop(); }catch(e){ logLine('ERRORE STOP: '+e, true); } } };
 
-/* === asset (deep snapshot) — enforcement via sid === */
+/* === asset (deep snapshot) === */
 $('btnAssets').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=($('addr').value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
