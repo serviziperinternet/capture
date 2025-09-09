@@ -94,13 +94,12 @@
 </div>
 
 <script>
-/* ===== helpers UI & log ===== */
 const $=id=>document.getElementById(id);
 function logLine(s, important=false){ const L=$('logBox'); const entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':''); L.textContent=entry+'\n'+L.textContent; L.scrollTop=0; }
 function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
-/* ===== Query ===== */
+/* === Query === */
 const qs=new URLSearchParams(location.search);
 let APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
 if(qs.get('u')) $('addr').value=qs.get('u');
@@ -109,16 +108,15 @@ if(qs.get('dom')) $('client').dataset.domain=qs.get('dom');
 if(qs.get('domain')) $('client').dataset.domain=qs.get('domain');
 if(qs.get('to')) $('rcpts').value=qs.get('to');
 if(qs.get('pec')) $('pecMode').value=qs.get('pec');
-// correzione endpoint /a/macros/ → /macros/
 if (APP && APP.indexOf('/a/macros/') >= 0) { logLine('ATTENZIONE: endpoint /a/macros/ → correggo in /macros/'); APP = APP.replace('/a/macros/','/macros/'); }
 
-/* ===== Stato ===== */
+/* === Stato === */
 let SID='', stream=null, rafId=null, hasShot=false, shareActive=false, recording=false;
 let recorder=null, recChunks=[];
 const video=document.createElement('video'); video.autoplay=true; video.muted=true; video.playsInline=true;
 const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWrap');
 
-/* ===== fetch helpers (con log) ===== */
+/* === fetch helpers === */
 async function GET(q){
   const url = APP + (APP.includes('?') ? '&' : '?') + q;
   logLine('REQ → ' + url);
@@ -142,7 +140,7 @@ async function POST(b){
   return r.json();
 }
 
-/* ===== UI state/busy ===== */
+/* === UI state/busy === */
 let BUSY=false, PREV_STATE=null;
 function snapshotUIState(){ return {full:!$('btnFull').disabled, assets:!$('btnAssets').disabled, snap:!$('btnSnap').disabled, save:!$('btnSave').disabled, rec:!$('btnRec').disabled, stop:!$('btnStop').disabled, open:($('btnOpen').style.display!=='none' && !$('btnOpen').disabled), share:($('btnShare').style.display!=='none' && !$('btnShare').disabled), finish:($('btnFinish').style.display!=='none' && !$('btnFinish').disabled)};}
 function setUIState(state){
@@ -173,7 +171,7 @@ async function withBusy(label, fn, opts){
   }
 }
 
-/* ===== anteprima 300×300 ===== */
+/* === anteprima 300×300 === */
 function drawPreview(){
   const ctx=thumb.getContext('2d'); const tw=thumb.width, th=thumb.height;
   ctx.fillStyle='#000'; ctx.fillRect(0,0,tw,th);
@@ -183,7 +181,7 @@ function drawPreview(){
 }
 (function(){ if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview); setUIState('idle'); logLine('BOOT — app='+(APP?'OK':'KO')+', token='+(TOKEN?'OK':'KO')); })();
 
-/* ===== start ===== */
+/* === start === */
 $('btnStart').onclick = async ()=>{
   if(SID){ logLine('Sessione già attiva.'); return; }
   const cli=$('client').value.trim(), url=($('addr').value||'').trim();
@@ -214,7 +212,7 @@ $('btnStart').onclick = async ()=>{
   }, {restore:false});
 };
 
-/* ===== apri + condividi ===== */
+/* === apri + condividi === */
 $('btnOpen').onclick = ()=>{
   const url=($('addr').value||'').trim(); if(!url){ alert('URL obbligatoria'); return; }
   window.open(url, '_we_clean_'+Date.now(), 'noopener,noreferrer,width=1280,height=900,menubar=no,toolbar=no,location=no,status=no');
@@ -234,60 +232,67 @@ $('btnShare').onclick = async ()=>{
   }, {restore:false});
 };
 
-/* ===== verifica URL (tri-stato) ===== */
+/* === verifica URL via helper GET (stessa pipeline di start) === */
+
 async function verifyUrlOrStop(){
   const rawU = (document.getElementById('addr').value || '').trim();
   const q = 'mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(rawU);
+
+  // (se usi già il mio GET “robusto”, va bene; altrimenti lascialo com’è)
   try{
     const js = await GET(q);
     if(!js || js.ok !== true){
       logLine('CHKURL ERR: risposta non OK dal server', true);
-      return null; // rete/CORS/non determinabile
+      return false;
     }
+    // Log super esplicito:
     logLine('CHKURL ORIG(raw) = '+js.orig);
     logLine('CHKURL NOW (raw) = '+js.now);
     logLine('CHKURL ORIG(norm)= '+js.origNorm);
     logLine('CHKURL NOW (norm)= '+js.nowNorm);
+
     if(js.mismatch){
       const diffs = Object.keys(js.diff || {}).filter(k => js.diff[k]);
       logLine('URL DIVERGENTE — PARTI DIVERSE: '+(diffs.join(', ')||'(?)'), true);
-      return false; // mismatch reale
+      return false;
     }
+
     logLine('Verifica URL OK — combaciano (norm)');
     return true;
   }catch(e){
+    // qui NON è mismatch: è errore rete/CORS
     logLine('CHKURL ERR: '+(e && e.message ? e.message : e), true);
-    return null; // rete/CORS/non determinabile
+    return false;
   }
 }
 
-/* ===== full page (SM + PSI) ===== */
+
+
+/* === full page (SM + SM full + PSI) — con sid per enforcement server === */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=($('addr').value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
   await withBusy('Cattura full page', async ()=>{
-    const ok = await verifyUrlOrStop();
-    if(ok !== true){
-      if(ok === false) throw new Error('Verifica URL fallita (mismatch)');
-      throw new Error('Verifica URL non raggiungibile (rete/CORS)');
-    }
+    let ok = await verifyUrlOrStop();
+    if(ok === false) throw new Error('Verifica URL fallita');
+    if(ok === null)  throw new Error('Verifica URL non raggiungibile (riprovare)');
 
     logLine('SM 1920×1240 in corso…');
     let sm1=await GET('mode=sm&sid='+encodeURIComponent(SID)+'&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240');
     if(!sm1.ok) throw new Error(sm1.error||'SM 1240');
-    let sv1=await POST({authToken:TOKEN,sid:SID,dataUrl:sm1.dataUrl,sendEmail:false,meta:{url=u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920x1240'}}});
+    let sv1=await POST({authToken:TOKEN,sid:SID,dataUrl:sm1.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920x1240'}}});
     logLine('Salvato: '+sv1.name+' sha='+sv1.sha256, true);
 
     logLine('SM 1920×full in corso…');
     let sm2=await GET('mode=sm&sid='+encodeURIComponent(SID)+'&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920xfull');
     if(!sm2.ok) throw new Error(sm2.error||'SM full');
-    let sv2=await POST({authToken:TOKEN,sid:SID,dataUrl:sm2.dataUrl,sendEmail:false,meta:{url=u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920xfull'}}});
+    let sv2=await POST({authToken:TOKEN,sid:SID,dataUrl:sm2.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920xfull'}}});
     logLine('Salvato: '+sv2.name+' sha='+sv2.sha256, true);
 
     logLine('PSI final screenshot…');
     let psi=await GET('mode=psi&sid='+encodeURIComponent(SID)+'&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u));
     if(psi.ok && psi.dataUrl){
-      let sv3=await POST({authToken:TOKEN,sid:SID,dataUrl:psi.dataUrl,sendEmail:false,meta:{url=u,sourceMeta:{provider:'psi',label:'PSI_FINAL'}}});
+      let sv3=await POST({authToken:TOKEN,sid:SID,dataUrl:psi.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'psi',label:'PSI_FINAL'}}});
       logLine('PSI salvato: '+sv3.name+' sha='+sv3.sha256, true);
     }else{
       logLine('PSI non disponibile.');
@@ -295,7 +300,7 @@ $('btnFull').onclick = async ()=>{
   });
 };
 
-/* ===== fence + scatto ===== */
+/* === fence + scatto + salva === */
 (function fence(){
   let drag=false,sx=0,sy=0;
   function bounds(e){ const r=capWrap.getBoundingClientRect(); return {x:Math.max(0,Math.min(e.clientX-r.left,r.width)), y:Math.max(0,Math.min(e.clientY-r.top,r.height))}; }
@@ -334,9 +339,9 @@ $('btnSnap').onclick = async ()=>{
   await withBusy('Scatto', async ()=>{
     if(!shareActive) throw new Error('Condivisione non attiva');
 
+    // Verifica “morbida”: se rete/CORS non disponibile non blocco lo scatto; bloccherò al salvataggio.
     const vres = await verifyUrlOrStop();
     if(vres === false) throw new Error('Verifica URL fallita (mismatch) — correggi l’URL in alto');
-    if(vres === null)  logLine('Check URL non disponibile (rete/CORS). Procedo con lo SCATTO; il SALVA richiederà un check OK.', true);
 
     const ready = await ensureVideoReady(); if(!ready) throw new Error('Stream non pronto');
 
@@ -360,8 +365,6 @@ $('btnSnap').onclick = async ()=>{
     logLine('Scatto eseguito ('+used+') → immagine grande pronta. Verifica URL verrà ribadita al salvataggio.', true);
   });
 };
-
-/* ===== costruisci payload + salva ===== */
 function makePayload(){
   if(!imgLarge.classList.contains('hasSrc')) return null;
   const natW=imgLarge.naturalWidth, natH=imgLarge.naturalHeight;
@@ -384,11 +387,10 @@ $('btnSave').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   if(!hasShot){ alert('Fai prima uno scatto'); return; }
   await withBusy('Salvataggio scatto', async ()=>{
+    // Verifica “dura”: qui DEVE passare
     const ok = await verifyUrlOrStop();
-    if(ok !== true){
-      if(ok === false) throw new Error('Bloccato: URL diversa (mismatch).');
-      throw new Error('Bloccato: impossibile verificare la URL (rete/CORS).');
-    }
+    if(ok !== true) throw new Error('Verifica URL fallita o non raggiungibile');
+
     const payload = await makePayload(); if(!payload){ logLine('Nessuna immagine.'); return; }
     const u=($('addr').value||'').trim();
     const label=(payload.crop?'FRAME_CROP':'FRAME_FULL');
@@ -398,7 +400,7 @@ $('btnSave').onclick = async ()=>{
   });
 };
 
-/* ===== REC / STOP ===== */
+/* === REC/STOP === */
 $('btnRec').onclick = async ()=>{
   if(!shareActive){ logLine('Condivisione non attiva: premi “Condividi”.', true); return; }
   if(recording){ logLine('Registrazione già in corso.'); return; }
@@ -412,7 +414,7 @@ $('btnRec').onclick = async ()=>{
       const blob = new Blob(recChunks, { type: recorder.mimeType || 'video/webm' });
       const b64 = await (new Promise((res,rej)=>{ const fr=new FileReader(); fr.onload=()=>res(fr.result); fr.onerror=rej; fr.readAsDataURL(blob); }));
       const u=($('addr').value||'').trim();
-      const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:b64,sendEmail:false,meta:{url=u,sourceMeta:{provider:'screen-capture',label:'REC_VIDEO'}}});
+      const sv=await POST({authToken:TOKEN,sid:SID,dataUrl:b64,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screen-capture',label:'REC_VIDEO'}}});
       if(!sv.ok) throw new Error(sv.error||'Errore salvataggio video');
       logLine('VIDEO salvato: '+sv.name+' sha='+sv.sha256+' (url='+u+'; final='+sv.finalUrl+')', true);
     };
@@ -421,22 +423,19 @@ $('btnRec').onclick = async ()=>{
 };
 $('btnStop').onclick = ()=>{ if(recorder && recording){ try{ recorder.stop(); }catch(e){ logLine('ERRORE STOP: '+e, true); } } };
 
-/* ===== asset (deep snapshot) ===== */
+/* === asset (deep snapshot) — enforcement via sid === */
 $('btnAssets').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=($('addr').value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
   await withBusy('Scarica asset', async ()=>{
-    const ok = await verifyUrlOrStop(); if(ok !== true){
-      if(ok === false) throw new Error('Verifica URL fallita (mismatch)');
-      throw new Error('Verifica URL non raggiungibile (rete/CORS)');
-    }
+    const ok = await verifyUrlOrStop(); if(ok !== true) throw new Error('Verifica URL fallita o non raggiungibile');
     const js=await GET('mode=snapshot&t='+encodeURIComponent(TOKEN||'')+'&id='+encodeURIComponent(SID)+'&u='+encodeURIComponent(u));
     if(!js.ok) throw new Error(js.error||'snapshot');
     logLine('HTML+asset salvati: '+(js.count||0), true);
   });
 };
 
-/* ===== termina ===== */
+/* === termina === */
 $('btnFinish').onclick = async ()=>{
   if(!SID){ alert('Nessuna sessione'); return; }
   await withBusy('Termina certificazione (ZIP + invio)', async ()=>{
