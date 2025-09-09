@@ -120,38 +120,23 @@ function autofillFromQuery(){
   const tokV   = pick(qs, 't','token');
   const urlV   = pick(qs, 'u','url','addr','address');
   const cliV   = pick(qs, 'client','cli','c');
-  const domV   = pick(qs, 'domain','dom','d');
   const rcptsV = pick(qs, 'to','rcpts','email','emails');
   const pecV   = pick(qs, 'pec');
 
   APP   = appV ? decodeURIComponent(appV) : '';
   TOKEN = tokV ? decodePlus(tokV) : '';
 
-  if(APP && APP.indexOf('/a/macros/') >= 0){
-    logLine('ATTENZIONE: endpoint /a/macros/ → correggo in /macros/');
-    APP = APP.replace('/a/macros/','/macros/');
-  }
-
   if(urlV)   $('addr').value = decodePlus(urlV);
   if(cliV)   $('client').value = decodePlus(cliV);
-  if(domV)   $('client').dataset.domain = decodePlus(domV);
   if(rcptsV) $('rcpts').value = decodePlus(rcptsV);
   if(pecV)   $('pecMode').value = decodePlus(pecV);
 
-  logLine(
-    'AUTOFILL → app='+(APP?'OK':'(vuoto)')
-    +', t='+(TOKEN?'OK':'(vuoto)')
-    +', client="'+$('client').value+'"'
-    +', addr="'+$('addr').value+'"'
-    +', rcpts="'+$('rcpts').value+'"'
-    +', pec="'+$('pecMode').value+'"',
-    true
-  );
+  logLine(`AUTOFILL → app=${APP?'OK':'(vuoto)'} t=${TOKEN?'OK':'(vuoto)'} client="${$('client').value}" addr="${$('addr').value}" rcpts="${$('rcpts').value}" pec="${$('pecMode').value}"`, true);
 }
 
-// Esegui subito (script è in fondo alla pagina) + di riserva su load
+// chiamala subito appena caricato lo script
 autofillFromQuery();
-window.addEventListener('load', () => setTimeout(autofillFromQuery, 0));
+
 
 
 /* === Stato === */
