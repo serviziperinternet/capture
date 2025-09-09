@@ -134,12 +134,42 @@ const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWr
 /* === fetch helpers === */
 async function GET(q){
   const url = APP + (APP.includes('?') ? '&' : '?') + q;
+
+  // Log prima di chiamare
   logLine('REQ → ' + url);
-  const r = await fetch(url,{cache:'no-store',mode:'cors',credentials:'omit',redirect:'follow',referrerPolicy:'no-referrer'});
-  if(!r.ok){ logLine('HTTP '+r.status+' ← '+url, true); throw new Error('HTTP '+r.status); }
-  logLine('HTTP '+r.status+' ← '+url);
-  return r.json();
+
+  try{
+    const r = await fetch(url, {
+      cache: 'no-store',
+      mode: 'cors',              // lasciamo cors
+      credentials: 'omit',
+      redirect: 'follow',
+      referrerPolicy: 'no-referrer'
+    });
+
+    // Se il browser ha bloccato per CORS, fetch non arriva qui.
+    if(!r.ok){
+      logLine('HTTP ' + r.status + ' ← ' + url, true);
+      throw new Error('HTTP '+r.status);
+    }
+
+    // Provo a leggere testo grezzo per avere errori più parlanti
+    const txt = await r.text();
+    try{
+      return JSON.parse(txt);
+    }catch(parseErr){
+      logLine('JSON parse error: ' + (parseErr.message||parseErr), true);
+      logLine('Body: ' + txt.slice(0,300), true);
+      throw new Error('Bad JSON');
+    }
+  }catch(err){
+    // QUI vedi "Failed to fetch" (CORS / rete)
+    logLine('FETCH ERR: '+(err && err.message ? err.message : String(err)), true);
+    // re-lancio per far gestire a chi chiama
+    throw err;
+  }
 }
+
 async function POST(b){
   const r=await fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(b)});
   if(!r.ok){ logLine('HTTP '+r.status+' ← POST', true); throw new Error('HTTP '+r.status); }
@@ -240,28 +270,46 @@ $('btnShare').onclick = async ()=>{
 
 /* === verifyUrlOrStop === */
 async function verifyUrlOrStop(){
-  const rawU = ($('addr').value||'').trim();
-  logLine('Verifica URL → invio al server: sid='+SID+' url="'+rawU+'"');
-  const q='mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(rawU);
+  const rawU = (document.getElementById('addr').value || '').trim();
+
+  // Log cliente super-esplicito PRIMA della fetch
+  logLine('Verifica URL → sid='+SID+' addr="'+rawU+'"');
+
+  const q = 'mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(rawU);
   try{
-    const js=await GET(q);
-    if(!js || js.ok!==true){ logLine('CHKURL ERR: risposta non OK', true); return false; }
-    logLine('CHKURL ORIG(raw)='+js.orig);
-    logLine('CHKURL NOW (raw)='+js.now);
-    logLine('CHKURL ORIG(norm)='+js.origNorm);
-    logLine('CHKURL NOW (norm)='+js.nowNorm);
-    if(js.mismatch){
-      const diffs=Object.keys(js.diff||{}).filter(k=>js.diff[k]);
-      logLine('URL DIVERGENTE — PARTI DIVERSE: '+(diffs.join(', ')||'(?)'), true);
+    const js = await GET(q);
+
+    if(!js || js.ok !== true){
+      logLine('CHKURL ERR: risposta non OK dal server (ok='+(js && js.ok)+')', true);
+      if(js && js.error) logLine('CHKURL server error: '+js.error, true);
       return false;
     }
-    logLine('Verifica URL OK — combaciano (norm)');
+
+    // Log di tutto, per l’avvocato
+    logLine('CHKURL.RAW → orig='+js.orig+' | now='+js.now);
+    logLine('CHKURL.NORM → origNorm='+js.origNorm+' | nowNorm='+js.nowNorm);
+    if(js.diff){
+      const parts = ['scheme','host','port','path','query','hash']
+        .map(k => k+':' + (js.diff[k] ? 'DIFF' : 'OK')).join(' | ');
+      logLine('CHKURL.DIFF → '+parts);
+    }
+    if(js.explain) logLine('CHKURL.EXPLAIN → '+js.explain);
+
+    if(js.mismatch){
+      logLine('URL DIVERGENTE — BLOCCO OPERAZIONE', true);
+      return false;
+    }
+
+    logLine('Verifica URL OK — combaciano (post-normalizzazione).');
     return true;
+
   }catch(e){
-    logLine('CHKURL ERR: '+(e&&e.message?e.message:e), true);
+    // Qui ci finisci quando vedi "Failed to fetch"
+    logLine('CHKURL ERR (rete/CORS): '+(e && e.message ? e.message : String(e)), true);
     return false;
   }
 }
+
 
 /* === full page === */
 $('btnFull').onclick = async ()=>{
