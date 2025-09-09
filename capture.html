@@ -99,8 +99,9 @@
 var $=function(id){ return document.getElementById(id); };
 function logLine(s, important){ if(important===void 0) important=false; var L=$('logBox'); var entry='['+(new Date().toLocaleTimeString())+'] '+s+(important?'\n':''); L.textContent=entry+'\n'+L.textContent; L.scrollTop=0; }
 function enable(el,on){ el.disabled=!on; if(on){ el.classList.remove('dim'); } else { el.classList.add('dim'); } }
+function sleep(ms){ return new Promise(function(r){ setTimeout(r,ms); }); }
 
-/* ===== Query + Prefill (stile v10) ===== */
+/* ===== Query + Prefill ===== */
 var qs=new URLSearchParams(location.search||'');
 var APP = qs.get('app')||'';
 var TOKEN = qs.get('t')||'';
@@ -108,7 +109,6 @@ if(qs.get('u')) $('addr').value = qs.get('u');
 if(qs.get('client')) $('client').value = qs.get('client');
 if(qs.get('to')) $('rcpts').value = qs.get('to');
 if(qs.get('dom')||qs.get('domain')){ $('client').dataset.domain = qs.get('dom')||qs.get('domain'); }
-
 logLine('BOOT — app='+(APP? 'OK' : 'MANCANTE')+', token='+(TOKEN? 'OK':'MANCANTE'));
 
 /* ===== stato ===== */
@@ -149,9 +149,26 @@ function setUIState(state){
 }
 (function init(){ setUIState('idle'); drawPreview(); })();
 
-/* ===== fetch helpers ===== */
-function GET(q){ return fetch(APP+(APP.indexOf('?')>=0?'&':'?')+q,{cache:'no-store'}).then(function(r){ return r.json(); }); }
-function POST(b){ return fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(b),cache:'no-store'}).then(function(r){ return r.json(); }); }
+/* ===== fetch helpers (con diagnostica + retry) ===== */
+function fetchJsonWithDiag(url){
+  logLine('REQ → '+url);
+  return fetch(url,{cache:'no-store'})
+    .then(function(r){
+      logLine('HTTP '+r.status+' ← '+url);
+      return r.json();
+    });
+}
+function GET(q){
+  var url = APP+(APP.indexOf('?')>=0?'&':'?')+q;
+  return fetchJsonWithDiag(url);
+}
+function POST(b){
+  return fetch(APP,{method:'POST',headers:{'Content-Type':'text/plain; charset=utf-8'},body:JSON.stringify(b),cache:'no-store'})
+    .then(function(r){
+      logLine('HTTP '+r.status+' ← POST '+APP);
+      return r.json();
+    });
+}
 
 /* ===== anteprima ===== */
 function drawPreview(){
@@ -205,6 +222,7 @@ $('btnShare').onclick = function(){
     return new Promise(function(r){ video.addEventListener('loadeddata', r, {once:true}); });
   })
   .then(function(){ return video.play(); })
+  .then(function(){ return sleep(120); }) // piccolo margine per evitare “stream non pronto”
   .then(function(){
     if(rafId) cancelAnimationFrame(rafId); rafId=requestAnimationFrame(drawPreview);
     shareActive=true; setUIState('shared');
@@ -216,20 +234,120 @@ $('btnShare').onclick = function(){
   .catch(function(e){ logLine('Condivisione negata: '+(e.message||e), true); });
 };
 
-/* ===== Anti-manomissione: checkUrl ===== */
+/* ===== Anti-manomissione: checkUrl con retry ===== */
 function verifyUrlOrStop(){
-  try{
-    var now = ($('addr').value||'').trim(); if(!now){ logLine('Verifica URL: campo vuoto', true); return Promise.resolve(false); }
-    return GET('mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(now))
+  var now = ($('addr').value||'').trim();
+  if(!now){ logLine('Verifica URL: campo vuoto', true); return Promise.resolve(false); }
+  var q = 'mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(now);
+
+  var tries=0;
+  function attempt(){
+    tries++;
+    return GET(q)
       .then(function(chk){
-        if(!chk.ok){ logLine('ERRORE verifica URL (server): '+(chk.error||'?'), true); return false; }
-        if(chk.mismatch){ logLine('URL variata / verifica fallita.\nOrig='+chk.orig+'\nNow ='+chk.now, true); return false; }
-        logLine('Verifica URL OK.\nOrig='+chk.orig+'\nNow ='+chk.now);
+        if(!chk || !chk.ok){ logLine('ERRORE verifica URL (server): '+((chk&&chk.error)||'?'), true); return false; }
+        if(chk.mismatch){
+          logLine('URL variata / verifica fallita.\nOrig='+chk.orig+'\nNow ='+chk.now+'\nDiag='+(chk.diag||'-'), true);
+          return false;
+        }
+        logLine('Verifica URL OK.\nOrig='+chk.orig+'\nNow ='+chk.now+'\nDiag='+(chk.diag||'-'));
         return true;
       })
-      .catch(function(e){ logLine('ERRORE verifica URL: '+(e.message||e), true); return false; });
-  }catch(e){ logLine('ERRORE verifica URL: '+(e.message||e), true); return Promise.resolve(false); }
+      .catch(function(e){
+        logLine('CHKURL GET errore ('+tries+'): '+(e&&e.message?e.message:e), true);
+        if(tries<3){ return sleep(350).then(attempt); }
+        return false;
+      });
+  }
+  logLine('CHKURL GET → '+(APP+(APP.indexOf('?')>=0?'&':'?')+q));
+  return attempt();
 }
+
+/* ===== helper scatto ===== */
+function isBlank(canvas){
+  try{
+    var ctx=canvas.getContext('2d');
+    var a=ctx.getImageData(0,0,Math.min(10,canvas.width||1),Math.min(10,canvas.height||1)).data;
+    for(var i=0;i<a.length;i+=4){ if(a[i]+a[i+1]+a[i+2]>0) return false; }
+  }catch(_){}
+  return true;
+}
+function ensureVideoReady(){
+  var tries=0;
+  return new Promise(function(res){
+    (function loop(){
+      if(video.videoWidth>0 && video.videoHeight>0){ requestAnimationFrame(function(){ requestAnimationFrame(function(){ res(true); }); }); return; }
+      tries++; if(tries>40){ res(false); return; } // ~5s
+      setTimeout(loop,120);
+    })();
+  });
+}
+
+/* ===== Scatta ===== */
+$('btnSnap').onclick = function(){
+  var vw=video.videoWidth, vh=video.videoHeight;
+  logLine('Click SCATTA (shareActive='+shareActive+', '+vw+'×'+vh+')');
+  if(!shareActive){ logLine('ERRORE in Scatto: Condivisione non attiva', true); return; }
+  verifyUrlOrStop()
+  .then(function(ok){ if(!ok){ throw new Error('Verifica URL fallita'); } return ensureVideoReady(); })
+  .then(function(ready){
+    if(!ready){ throw new Error('Stream non pronto'); }
+    var w=video.videoWidth||1, h=video.videoHeight||1;
+    var c=document.createElement('canvas'); c.width=w; c.height=h; var ctx=c.getContext('2d');
+    var used='drawImage';
+    try{ ctx.drawImage(video,0,0,w,h); }catch(e){ used='drawImage_err:'+e; }
+    if(isBlank(c)){
+      var track=(stream && stream.getVideoTracks && stream.getVideoTracks()[0])? stream.getVideoTracks()[0] : null;
+      if(!track){ throw new Error('Track video mancante'); }
+      try{
+        var cap=new ImageCapture(track);
+        return cap.grabFrame().then(function(bmp){
+          w=bmp.width; h=bmp.height; c.width=w; c.height=h; ctx.drawImage(bmp,0,0); used='ImageCapture.grabFrame';
+          imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
+          hasShot=true; enable($('btnSave'), true); setUIState('shared');
+          logLine('Scatto eseguito ('+used+') → immagine grande pronta.', true);
+        });
+      }catch(e){ throw new Error('Fallback grabFrame fallito: '+e.message); }
+    }else{
+      imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
+      hasShot=true; enable($('btnSave'), true); setUIState('shared');
+      logLine('Scatto eseguito ('+used+') → immagine grande pronta.', true);
+    }
+  })
+  .catch(function(e){ logLine('ERRORE in Scatto: '+(e.message||e), true); });
+};
+
+/* ===== Crop → Salva PNG ===== */
+function makePayload(cb){
+  if(!imgLarge.classList.contains('hasSrc')) return cb(null);
+  var natW=imgLarge.naturalWidth, natH=imgLarge.naturalHeight;
+  var dispW=imgLarge.clientWidth, dispH=imgLarge.clientHeight;
+  var rx=parseFloat(rect.style.left)||0, ry=parseFloat(rect.style.top)||0;
+  var rw=parseFloat(rect.style.width)||0, rh=parseFloat(rect.style.height)||0;
+  var needCrop = rect.style.display!=='none' && rw>2 && rh>2;
+  var c=document.createElement('canvas'); var ctx=c.getContext('2d'); var tmp=new Image(); tmp.src=imgLarge.src;
+  tmp.onload=function(){
+    if(!needCrop){ c.width=natW; c.height=natH; ctx.drawImage(tmp,0,0); cb({dataUrl:c.toDataURL('image/png'), crop:null}); return; }
+    var ax=Math.round(rx*natW/dispW), ay=Math.round(ry*natH/dispH);
+    var aw=Math.round(rw*natW/dispW), ah=Math.round(rh*natH/dispH);
+    c.width=Math.max(1,aw); c.height=Math.max(1,ah); ctx.drawImage(tmp,ax,ay,aw,ah,0,0,c.width,c.height);
+    cb({dataUrl:c.toDataURL('image/png'), crop:{x:ax,y:ay,w:aw,h:ah,naturalW:natW,naturalH:natH}});
+  };
+}
+$('btnSave').onclick = function(){
+  if(!SID){ alert('Avvia certificazione'); return; }
+  if(!hasShot){ alert('Fai prima uno scatto'); return; }
+  verifyUrlOrStop().then(function(ok){ if(!ok) return; makePayload(function(payload){
+    if(!payload){ logLine('Nessuna immagine.'); return; }
+    var u=($('addr').value||'').trim();
+    var label=(payload.crop?'FRAME_CROP':'FRAME_FULL');
+    POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screen-capture',label:label},crop:payload.crop}})
+    .then(function(sv){ if(!sv.ok){ logLine('ERRORE Salvataggio scatto: '+(sv.error||'?'), true); return; }
+      logLine('PNG salvato: '+sv.name+' sha='+sv.sha256+' (url='+u+'; final='+sv.finalUrl+')', true);
+    })
+    .catch(function(e){ logLine('ERRORE Salvataggio scatto: '+(e.message||e), true); });
+  }); });
+};
 
 /* ===== Full page (SM + PSI) ===== */
 $('btnFull').onclick = function(){
@@ -284,8 +402,8 @@ $('btnAssets').onclick = function(){
   capWrap.addEventListener('pointerdown', function(e){
     if(!imgLarge.classList.contains('hasSrc')) return;
     if(e.button!==0 && e.pointerType==='mouse') return;
-    e.preventDefault(); drag=true; if(capWrap.setPointerCapture) capWrap.setPointerCapture(e.pointerId);
-    var p=bounds(e); sx=p.x; sy=p.y; rect.style.display='block';
+    e.preventDefault(); if(capWrap.setPointerCapture) capWrap.setPointerCapture(e.pointerId);
+    drag=true; var p=bounds(e); sx=p.x; sy=p.y; rect.style.display='block';
     rect.style.left=sx+'px'; rect.style.top=sy+'px'; rect.style.width='0px'; rect.style.height='0px';
   });
   window.addEventListener('pointermove', function(e){
@@ -295,93 +413,6 @@ $('btnAssets').onclick = function(){
   });
   window.addEventListener('pointerup', function(){ drag=false; });
 })();
-
-/* ===== helpers scatto ===== */
-function isBlank(canvas){
-  try{
-    var ctx=canvas.getContext('2d');
-    var a=ctx.getImageData(0,0,Math.min(10,canvas.width||1),Math.min(10,canvas.height||1)).data;
-    for(var i=0;i<a.length;i+=4){ if(a[i]+a[i+1]+a[i+2]>0) return false; }
-  }catch(_){}
-  return true;
-}
-function ensureVideoReady(){
-  var tries=0;
-  return new Promise(function(res){
-    (function loop(){
-      if(video.videoWidth>0 && video.videoHeight>0){ requestAnimationFrame(function(){ requestAnimationFrame(function(){ res(true); }); }); return; }
-      tries++; if(tries>25){ res(false); return; }
-      setTimeout(loop,120);
-    })();
-  });
-}
-
-/* ===== Scatta ===== */
-$('btnSnap').onclick = function(){
-  var vw=video.videoWidth, vh=video.videoHeight;
-  logLine('Click SCATTA (shareActive='+shareActive+', '+vw+'×'+vh+')');
-  if(!shareActive){ logLine('ERRORE in Scatto: Condivisione non attiva', true); return; }
-  verifyUrlOrStop().then(function(ok){
-    if(!ok){ logLine('ERRORE in Scatto: Verifica URL fallita', true); return; }
-    return ensureVideoReady();
-  })
-  .then(function(ready){
-    if(!ready){ logLine('ERRORE in Scatto: Stream non pronto', true); return; }
-    var w=video.videoWidth||1, h=video.videoHeight||1;
-    var c=document.createElement('canvas'); c.width=w; c.height=h; var ctx=c.getContext('2d');
-    var used='drawImage';
-    try{ ctx.drawImage(video,0,0,w,h); }catch(e){ used='drawImage_err:'+e; }
-    if(isBlank(c)){
-      try{
-        var track=stream.getVideoTracks()[0];
-        var cap=new ImageCapture(track);
-        return cap.grabFrame().then(function(bmp){
-          w=bmp.width; h=bmp.height; c.width=w; c.height=h; ctx.drawImage(bmp,0,0); used='ImageCapture.grabFrame';
-          imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
-          hasShot=true; enable($('btnSave'), true); setUIState('shared');
-          logLine('Scatto eseguito ('+used+') → immagine grande pronta.', true);
-        });
-      }catch(e){ logLine('ERRORE in Scatto: Fallback grabFrame fallito: '+e.message, true); return; }
-    }else{
-      imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
-      hasShot=true; enable($('btnSave'), true); setUIState('shared');
-      logLine('Scatto eseguito ('+used+') → immagine grande pronta.', true);
-    }
-  })
-  .catch(function(e){ logLine('ERRORE in Scatto: '+(e.message||e), true); });
-};
-
-/* ===== Salva PNG ===== */
-function makePayload(cb){
-  if(!imgLarge.classList.contains('hasSrc')) return cb(null);
-  var natW=imgLarge.naturalWidth, natH=imgLarge.naturalHeight;
-  var dispW=imgLarge.clientWidth, dispH=imgLarge.clientHeight;
-  var rx=parseFloat(rect.style.left)||0, ry=parseFloat(rect.style.top)||0;
-  var rw=parseFloat(rect.style.width)||0, rh=parseFloat(rect.style.height)||0;
-  var needCrop = rect.style.display!=='none' && rw>2 && rh>2;
-  var c=document.createElement('canvas'); var ctx=c.getContext('2d'); var tmp=new Image(); tmp.src=imgLarge.src;
-  tmp.onload=function(){
-    if(!needCrop){ c.width=natW; c.height=natH; ctx.drawImage(tmp,0,0); cb({dataUrl:c.toDataURL('image/png'), crop:null}); return; }
-    var ax=Math.round(rx*natW/dispW), ay=Math.round(ry*natH/dispH);
-    var aw=Math.round(rw*natW/dispW), ah=Math.round(rh*natH/dispH);
-    c.width=Math.max(1,aw); c.height=Math.max(1,ah); ctx.drawImage(tmp,ax,ay,aw,ah,0,0,c.width,c.height);
-    cb({dataUrl:c.toDataURL('image/png'), crop:{x:ax,y:ay,w:aw,h:ah,naturalW:natW,naturalH:natH}});
-  };
-}
-$('btnSave').onclick = function(){
-  if(!SID){ alert('Avvia certificazione'); return; }
-  if(!hasShot){ alert('Fai prima uno scatto'); return; }
-  verifyUrlOrStop().then(function(ok){ if(!ok) return; makePayload(function(payload){
-    if(!payload){ logLine('Nessuna immagine.'); return; }
-    var u=($('addr').value||'').trim();
-    var label=(payload.crop?'FRAME_CROP':'FRAME_FULL');
-    POST({authToken:TOKEN,sid:SID,dataUrl:payload.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screen-capture',label:label},crop:payload.crop}})
-    .then(function(sv){ if(!sv.ok){ logLine('ERRORE Salvataggio scatto: '+(sv.error||'?'), true); return; }
-      logLine('PNG salvato: '+sv.name+' sha='+sv.sha256+' (url='+u+'; final='+sv.finalUrl+')', true);
-    })
-    .catch(function(e){ logLine('ERRORE Salvataggio scatto: '+(e.message||e), true); });
-  }); });
-};
 
 /* ===== REC/STOP ===== */
 $('btnRec').onclick = function(){
