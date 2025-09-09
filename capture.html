@@ -118,11 +118,20 @@ const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWr
 
 /* === fetch helpers === */
 async function GET(q){
-  const url = APP+(APP.includes('?')?'&':'?')+q;
-  logLine('REQ → '+url);
-  const r=await fetch(url,{cache:'no-store'});
-  if(!r.ok){ logLine('HTTP '+r.status+' ← '+url, true); throw new Error('HTTP '+r.status); }
-  logLine('HTTP '+r.status+' ← '+url);
+  const url = APP + (APP.includes('?') ? '&' : '?') + q;
+  logLine('REQ → ' + url);
+  const r = await fetch(url, {
+    cache: 'no-store',
+    mode: 'cors',
+    credentials: 'omit',
+    redirect: 'follow',
+    referrerPolicy: 'no-referrer'
+  });
+  if(!r.ok){
+    logLine('HTTP ' + r.status + ' ← ' + url, true);
+    throw new Error('HTTP '+r.status);
+  }
+  logLine('HTTP ' + r.status + ' ← ' + url);
   return r.json();
 }
 async function POST(b){
