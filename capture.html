@@ -99,16 +99,24 @@ function logLine(s, important=false){ const L=$('logBox'); const entry='['+(new 
 function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
-/* === Query === */
+
+/* === Query (prefill semplice e robusto) === */
 const qs=new URLSearchParams(location.search);
 let APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
-if(qs.get('u')) $('addr').value=qs.get('u');
-if(qs.get('client')) $('client').value=qs.get('client');
-if(qs.get('dom')) $('client').dataset.domain=qs.get('dom');
-if(qs.get('domain')) $('client').dataset.domain=qs.get('domain');
-if(qs.get('to')) $('rcpts').value=qs.get('to');
-if(qs.get('pec')) $('pecMode').value=qs.get('pec');
-if (APP && APP.indexOf('/a/macros/') >= 0) { logLine('ATTENZIONE: endpoint /a/macros/ → correggo in /macros/'); APP = APP.replace('/a/macros/','/macros/'); }
+
+if (APP && APP.indexOf('/a/macros/') >= 0) {
+  logLine('ATTENZIONE: endpoint /a/macros/ → correggo in /macros/');
+  APP = APP.replace('/a/macros/','/macros/');
+}
+
+if(qs.get('u')) $('addr').value = decodeURIComponent(qs.get('u'));
+if(qs.get('client')) $('client').value = decodeURIComponent(qs.get('client'));
+if(qs.get('dom')) $('client').dataset.domain = qs.get('dom');
+if(qs.get('domain')) $('client').dataset.domain = qs.get('domain');
+if(qs.get('to')) $('rcpts').value = decodeURIComponent(qs.get('to'));
+if(qs.get('pec')) $('pecMode').value = qs.get('pec');
+
+logLine('AUTOFILL → client="'+$('client').value+'" addr="'+$('addr').value+'" rcpts="'+$('rcpts').value+'" pec="'+$('pecMode').value+'"', true);
 
 /* === Stato === */
 let SID='', stream=null, rafId=null, hasShot=false, shareActive=false, recording=false;
