@@ -224,16 +224,40 @@ $('btnShare').onclick = async ()=>{
 };
 
 /* === verifica URL via helper GET (stessa pipeline di start) === */
+
 async function verifyUrlOrStop(){
+  const rawU = (document.getElementById('addr').value || '').trim();
+  const q = 'mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(rawU);
+
+  // (se usi già il mio GET “robusto”, va bene; altrimenti lascialo com’è)
   try{
-    const js=await GET('mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(($('addr').value||'').trim()));
-    logLine('CHKURL ← ok | mismatch='+js.mismatch+' | ORIG='+js.orig+' | NOW='+js.now, true);
-    return !js.mismatch;
+    const js = await GET(q);
+    if(!js || js.ok !== true){
+      logLine('CHKURL ERR: risposta non OK dal server', true);
+      return false;
+    }
+    // Log super esplicito:
+    logLine('CHKURL ORIG(raw) = '+js.orig);
+    logLine('CHKURL NOW (raw) = '+js.now);
+    logLine('CHKURL ORIG(norm)= '+js.origNorm);
+    logLine('CHKURL NOW (norm)= '+js.nowNorm);
+
+    if(js.mismatch){
+      const diffs = Object.keys(js.diff || {}).filter(k => js.diff[k]);
+      logLine('URL DIVERGENTE — PARTI DIVERSE: '+(diffs.join(', ')||'(?)'), true);
+      return false;
+    }
+
+    logLine('Verifica URL OK — combaciano (norm)');
+    return true;
   }catch(e){
-    logLine('CHKURL ERR: '+(e.message||e), true);
-    return null; // rete/CORS non disponibile
+    // qui NON è mismatch: è errore rete/CORS
+    logLine('CHKURL ERR: '+(e && e.message ? e.message : e), true);
+    return false;
   }
 }
+
+
 
 /* === full page (SM + SM full + PSI) — con sid per enforcement server === */
 $('btnFull').onclick = async ()=>{
