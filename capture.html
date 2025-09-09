@@ -112,6 +112,15 @@ function pick(qs, ...keys){
 }
 function decodePlus(s){ return (s||'').replace(/\+/g,' '); }
 
+  function decodeAny(s){
+  try {
+    return decodeURIComponent((s||'').replace(/\+/g,' '));
+  } catch(e){
+    return (s||'').replace(/\+/g,' ');
+  }
+}
+
+  
 function autofillFromQuery(){
   const search = location.search || '';
   const qs = new URLSearchParams(search);
@@ -126,10 +135,10 @@ function autofillFromQuery(){
   APP   = appV ? decodeURIComponent(appV) : '';
   TOKEN = tokV ? decodePlus(tokV) : '';
 
-  if(urlV)   $('addr').value = decodePlus(urlV);
-  if(cliV)   $('client').value = decodePlus(cliV);
-  if(rcptsV) $('rcpts').value = decodePlus(rcptsV);
-  if(pecV)   $('pecMode').value = decodePlus(pecV);
+if(urlV)   $('addr').value = decodeAny(urlV);
+if(cliV)   $('client').value = decodeAny(cliV);
+if(rcptsV) $('rcpts').value = decodeAny(rcptsV);
+if(pecV)   $('pecMode').value = decodeAny(pecV);
 
   logLine(`AUTOFILL → app=${APP?'OK':'(vuoto)'} t=${TOKEN?'OK':'(vuoto)'} client="${$('client').value}" addr="${$('addr').value}" rcpts="${$('rcpts').value}" pec="${$('pecMode').value}"`, true);
 }
