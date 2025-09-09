@@ -100,47 +100,59 @@ function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
 /* === Query — PREFILL ROBUSTO (vecchio + nuovo) === */
-let APP='', TOKEN='';
-(function prefillNow(){
-  const qs=new URLSearchParams(location.search);
-  const get = k => (qs.has(k) ? (qs.get(k)||'') : '');
-  // legge più alias (retrocompatibile)
-  const u   = get('u')      || get('url')   || '';
-  const cli = get('client') || get('c')     || '';
-  const to  = get('to')     || get('email') || '';
-  const dom = get('domain') || get('dom')   || '';
-  const pec = get('pec')    || '';
+/* === Query (robusto + log) === */
+let APP = '', TOKEN = '';
 
-  APP   = get('app') || '';
-  TOKEN = get('t')   || '';
+function pick(qs, ...keys){
+  for(const k of keys){
+    const v = qs.get(k);
+    if(v !== null && v !== undefined && v !== '') return v;
+  }
+  return '';
+}
+function decodePlus(s){ return (s||'').replace(/\+/g,' '); }
 
-  // correzione endpoint /a/macros/ → /macros/
-  if (APP && APP.indexOf('/a/macros/') >= 0) {
+function autofillFromQuery(){
+  const search = location.search || '';
+  const qs = new URLSearchParams(search);
+
+  const appV   = pick(qs, 'app');
+  const tokV   = pick(qs, 't','token');
+  const urlV   = pick(qs, 'u','url','addr','address');
+  const cliV   = pick(qs, 'client','cli','c');
+  const domV   = pick(qs, 'domain','dom','d');
+  const rcptsV = pick(qs, 'to','rcpts','email','emails');
+  const pecV   = pick(qs, 'pec');
+
+  APP   = appV ? decodeURIComponent(appV) : '';
+  TOKEN = tokV ? decodePlus(tokV) : '';
+
+  if(APP && APP.indexOf('/a/macros/') >= 0){
+    logLine('ATTENZIONE: endpoint /a/macros/ → correggo in /macros/');
     APP = APP.replace('/a/macros/','/macros/');
   }
 
-  // scrive sia via DOM che via "global id" (come la versione che ti funzionava)
-  try{ document.getElementById('addr').value   = u; }catch(_){}
-  try{ if (window.addr)   window.addr.value   = u; }catch(_){}
-  try{ document.getElementById('client').value = cli; }catch(_){}
-  try{ if (window.client) window.client.value = cli; }catch(_){}
-  try{ document.getElementById('rcpts').value  = to; }catch(_){}
-  try{ if (window.rcpts) window.rcpts.value   = to; }catch(_){}
-  try{ if(dom) document.getElementById('client').dataset.domain = dom; }catch(_){}
-  try{ if(pec) document.getElementById('pecMode').value = pec; }catch(_){}
+  if(urlV)   $('addr').value = decodePlus(urlV);
+  if(cliV)   $('client').value = decodePlus(cliV);
+  if(domV)   $('client').dataset.domain = decodePlus(domV);
+  if(rcptsV) $('rcpts').value = decodePlus(rcptsV);
+  if(pecV)   $('pecMode').value = decodePlus(pecV);
 
-  // log chiaro dell’autofill
-  logLine('AUTOFILL → url="'+(u||'(vuota)')+'", client="'+(cli||'(vuoto)')+'", to="'+(to||'(vuoto)')+'"');
-})();
-// secondo pass dopo il parsing completo del DOM (in caso qualche browser sia lento)
-document.addEventListener('DOMContentLoaded', ()=> prefillNowSafe());
-setTimeout(()=> prefillNowSafe(), 0);
-function prefillNowSafe(){
-  // rilegge dai campi già riempiti e assicura coerenza
-  if(window.addr && !window.addr.value && $('addr')) window.addr.value = $('addr').value;
-  if(window.client && !window.client.value && $('client')) window.client.value = $('client').value;
-  if(window.rcpts && !window.rcpts.value && $('rcpts')) window.rcpts.value = $('rcpts').value;
+  logLine(
+    'AUTOFILL → app='+(APP?'OK':'(vuoto)')
+    +', t='+(TOKEN?'OK':'(vuoto)')
+    +', client="'+$('client').value+'"'
+    +', addr="'+$('addr').value+'"'
+    +', rcpts="'+$('rcpts').value+'"'
+    +', pec="'+$('pecMode').value+'"',
+    true
+  );
 }
+
+// Esegui subito (script è in fondo alla pagina) + di riserva su load
+autofillFromQuery();
+window.addEventListener('load', () => setTimeout(autofillFromQuery, 0));
+
 
 /* === Stato === */
 let SID='', stream=null, rafId=null, hasShot=false, shareActive=false, recording=false;
