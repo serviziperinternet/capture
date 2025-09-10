@@ -67,13 +67,18 @@
   <div class="card">
     <h3>Controlli</h3>
     <div class="controls" id="controlsBox">
+      <!-- Riga 1: full page + asset -->
       <div class="row">
         <button id="btnFull" type="button" disabled class="dim">Cattura full page</button>
         <button id="btnAssets" type="button" disabled class="dim">Scarica asset</button>
       </div>
+      <!-- Riga 2: scatta + salva -->
       <div class="row">
         <button id="btnSnap" type="button" disabled class="dim">Scatta</button>
         <button id="btnSave" type="button" disabled class="dim">Salva</button>
+      </div>
+      <!-- Riga 3: REC + STOP (sotto i pulsanti di scatto) -->
+      <div class="row">
         <button id="btnRec" type="button" disabled class="dim">REC</button>
         <button id="btnStop" type="button" disabled class="dim">STOP</button>
       </div>
@@ -100,7 +105,7 @@ function logLine(s, important=false){ const L=$('logBox'); const entry='['+(new 
 function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
-/* ===== Prefill SEMPLICE (quello che ti funzionava) ===== */
+/* ===== Prefill semplice ===== */
 const qs=new URLSearchParams(location.search);
 let APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
 if(qs.get('u')) $('addr').value=qs.get('u');
@@ -233,12 +238,12 @@ $('btnShare').onclick = async ()=>{
   }, {restore:false});
 };
 
-/* ===== NIENTE VERIFICA URL ===== */
+/* ===== nota: verifica URL disattivata lato client ===== */
 function urlCheckDisabledNote(){
   logLine('Verifica URL DISATTIVATA lato client (nessun blocco/mismatch).', true);
 }
 
-/* ===== full page (SM + SM full + PSI) — senza sid ===== */
+/* ===== full page (SM + SM full + PSI) ===== */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=($('addr').value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
@@ -246,19 +251,19 @@ $('btnFull').onclick = async ()=>{
     urlCheckDisabledNote();
 
     logLine('SM 1920×1240 in corso…');
-    let sm1=await GET('mode=sm'+'&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240'); // ← niente sid
+    let sm1=await GET('mode=sm'+'&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240');
     if(!sm1.ok) throw new Error(sm1.error||'SM 1240');
     let sv1=await POST({authToken:TOKEN,sid:SID,dataUrl:sm1.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920x1240'}}});
     logLine('Salvato: '+sv1.name+' sha='+sv1.sha256, true);
 
     logLine('SM 1920×full in corso…');
-    let sm2=await GET('mode=sm'+'&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920xfull'); // ← niente sid
+    let sm2=await GET('mode=sm'+'&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920xfull');
     if(!sm2.ok) throw new Error(sm2.error||'SM full');
     let sv2=await POST({authToken:TOKEN,sid:SID,dataUrl:sm2.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'screenshotmachine',label:'SM_1920xfull'}}});
     logLine('Salvato: '+sv2.name+' sha='+sv2.sha256, true);
 
     logLine('PSI final screenshot…');
-    let psi=await GET('mode=psi'+'&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)); // ← niente sid
+    let psi=await GET('mode=psi'+'&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u));
     if(psi.ok && psi.dataUrl){
       let sv3=await POST({authToken:TOKEN,sid:SID,dataUrl:psi.dataUrl,sendEmail:false,meta:{url:u,sourceMeta:{provider:'psi',label:'PSI_FINAL'}}});
       logLine('PSI salvato: '+sv3.name+' sha='+sv3.sha256, true);
@@ -326,9 +331,11 @@ $('btnSnap').onclick = async ()=>{
       }catch(e){ throw new Error('Fallback grabFrame fallito: '+e.message); }
     }
     imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
-    hasShot=true; enable($('btnSave'), true);
+    hasShot=true;
+    enable($('btnSave'), true);
+    setUIState('shared'); // ← forza il ricalcolo UI: SALVA rimane attivo subito dopo lo scatto
     logLine('Scatto eseguito ('+used+') → immagine grande pronta.', true);
-  });
+  }, {restore:false}); // ← impedisce il ripristino dello stato precedente che disabilitava SALVA
 };
 function makePayload(){
   if(!imgLarge.classList.contains('hasSrc')) return null;
@@ -386,7 +393,7 @@ $('btnRec').onclick = async ()=>{
 };
 $('btnStop').onclick = ()=>{ if(recorder && recording){ try{ recorder.stop(); }catch(e){ logLine('ERRORE STOP: '+e, true); } } };
 
-/* ===== asset (deep snapshot) — ATTENZIONE: richiede patch server ===== */
+/* ===== asset ===== */
 $('btnAssets').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=($('addr').value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
