@@ -67,17 +67,17 @@
   <div class="card">
     <h3>Controlli</h3>
     <div class="controls" id="controlsBox">
-      <!-- Riga 1: full page + asset -->
+      <!-- Riga 1: full page / asset -->
       <div class="row">
         <button id="btnFull" type="button" disabled class="dim">Cattura full page</button>
         <button id="btnAssets" type="button" disabled class="dim">Scarica asset</button>
       </div>
-      <!-- Riga 2: scatta + salva -->
+      <!-- Riga 2: scatta / salva -->
       <div class="row">
         <button id="btnSnap" type="button" disabled class="dim">Scatta</button>
         <button id="btnSave" type="button" disabled class="dim">Salva</button>
       </div>
-      <!-- Riga 3: REC + STOP (sotto i pulsanti di scatto) -->
+      <!-- Riga 3: REC / STOP (sotto Scatta, come richiesto) -->
       <div class="row">
         <button id="btnRec" type="button" disabled class="dim">REC</button>
         <button id="btnStop" type="button" disabled class="dim">STOP</button>
@@ -105,7 +105,7 @@ function logLine(s, important=false){ const L=$('logBox'); const entry='['+(new 
 function enable(el,on){ el.disabled=!on; el.classList.toggle('dim', !on); }
 const sleep = ms => new Promise(r=>setTimeout(r,ms));
 
-/* ===== Prefill semplice ===== */
+/* ===== Prefill SEMPLICE ===== */
 const qs=new URLSearchParams(location.search);
 let APP=qs.get('app')||'', TOKEN=qs.get('t')||'';
 if(qs.get('u')) $('addr').value=qs.get('u');
@@ -148,13 +148,46 @@ async function POST(b){
 
 /* ===== UI state/busy ===== */
 let BUSY=false, PREV_STATE=null;
-function snapshotUIState(){ return {full:!$('btnFull').disabled, assets:!$('btnAssets').disabled, snap:!$('btnSnap').disabled, save:!$('btnSave').disabled, rec:!$('btnRec').disabled, stop:!$('btnStop').disabled, open:($('btnOpen').style.display!=='none' && !$('btnOpen').disabled), share:($('btnShare').style.display!=='none' && !$('btnShare').disabled), finish:($('btnFinish').style.display!=='none' && !$('btnFinish').disabled)};}
+function snapshotUIState(){
+  return {
+    full:!$('btnFull').disabled, assets:!$('btnAssets').disabled,
+    snap:!$('btnSnap').disabled, save:!$('btnSave').disabled,
+    rec:!$('btnRec').disabled, stop:!$('btnStop').disabled,
+    open:($('btnOpen').style.display!=='none' && !$('btnOpen').disabled),
+    share:($('btnShare').style.display!=='none' && !$('btnShare').disabled),
+    finish:($('btnFinish').style.display!=='none' && !$('btnFinish').disabled)
+  };
+}
 function setUIState(state){
-  if(state==='idle'){ enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false); enable($('btnRec'), false); enable($('btnStop'), false); $('btnOpen').style.display='none'; $('btnShare').style.display='none'; }
-  if(state==='started'){ $('btnOpen').style.display='inline-block'; enable($('btnOpen'), true); $('btnShare').style.display='none'; enable($('btnFull'), true); enable($('btnAssets'), true); enable($('btnSnap'), false); enable($('btnSave'), false); enable($('btnRec'), false); enable($('btnStop'), false); }
-  if(state==='shared'){ enable($('btnFull'), true); enable($('btnAssets'), true); enable($('btnSnap'), true); enable($('btnSave'), hasShot); enable($('btnRec'), !recording); enable($('btnStop'), recording); }
-  if(state==='recording'){ enable($('btnFull'), false); enable($('btnAssets'), false); enable($('btnSnap'), false); enable($('btnSave'), false); enable($('btnRec'), false); enable($('btnStop'), true); }
-  if(state==='locked'){ enable($('btnSnap'), false); enable($('btnSave'), false); enable($('btnFull'), true); enable($('btnAssets'), true); enable($('btnRec'), false); enable($('btnStop'), false); }
+  if(state==='idle'){
+    enable($('btnFull'), false); enable($('btnAssets'), false);
+    enable($('btnSnap'), false); enable($('btnSave'), false);
+    enable($('btnRec'), false);  enable($('btnStop'), false);
+    $('btnOpen').style.display='none'; $('btnShare').style.display='none';
+  }
+  if(state==='started'){
+    $('btnOpen').style.display='inline-block'; enable($('btnOpen'), true);
+    $('btnShare').style.display='none';
+    enable($('btnFull'), true); enable($('btnAssets'), true);
+    enable($('btnSnap'), false); enable($('btnSave'), false);
+    enable($('btnRec'), false);  enable($('btnStop'), false);
+  }
+  if(state==='shared'){
+    enable($('btnFull'), true); enable($('btnAssets'), true);
+    enable($('btnSnap'), true);
+    enable($('btnSave'), hasShot);          // <— salva dipende da scatto
+    enable($('btnRec'), !recording); enable($('btnStop'), recording);
+  }
+  if(state==='recording'){
+    enable($('btnFull'), false); enable($('btnAssets'), false);
+    enable($('btnSnap'), false); enable($('btnSave'), false);
+    enable($('btnRec'), false);  enable($('btnStop'), true);
+  }
+  if(state==='locked'){
+    enable($('btnSnap'), false); enable($('btnSave'), false);
+    enable($('btnFull'), true);  enable($('btnAssets'), true);
+    enable($('btnRec'), false);  enable($('btnStop'), false);
+  }
   if(state==='finished'){ document.querySelectorAll('button').forEach(b=> b.disabled=true); }
 }
 async function withBusy(label, fn, opts){
@@ -168,8 +201,9 @@ async function withBusy(label, fn, opts){
   finally{
     BUSY=false;
     if(restore && PREV_STATE){
-      enable($('btnFull'), !!PREV_STATE.full); enable($('btnAssets'), !!PREV_STATE.assets); enable($('btnSnap'), !!PREV_STATE.snap);
-      enable($('btnSave'), !!PREV_STATE.save); enable($('btnRec'), !!PREV_STATE.rec); enable($('btnStop'), !!PREV_STATE.stop);
+      enable($('btnFull'), !!PREV_STATE.full); enable($('btnAssets'), !!PREV_STATE.assets);
+      enable($('btnSnap'), !!PREV_STATE.snap); enable($('btnSave'), !!PREV_STATE.save);
+      enable($('btnRec'), !!PREV_STATE.rec);   enable($('btnStop'), !!PREV_STATE.stop);
       if($('btnOpen').style.display!=='none') $('btnOpen').disabled=!PREV_STATE.open;
       if($('btnShare').style.display!=='none') $('btnShare').disabled=!PREV_STATE.share;
       if($('btnFinish').style.display!=='none') $('btnFinish').disabled=!PREV_STATE.finish;
@@ -238,18 +272,17 @@ $('btnShare').onclick = async ()=>{
   }, {restore:false});
 };
 
-/* ===== nota: verifica URL disattivata lato client ===== */
+/* ===== NIENTE VERIFICA URL ===== */
 function urlCheckDisabledNote(){
   logLine('Verifica URL DISATTIVATA lato client (nessun blocco/mismatch).', true);
 }
 
-/* ===== full page (SM + SM full + PSI) ===== */
+/* ===== full page (SM + SM full + PSI) — senza sid ===== */
 $('btnFull').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=($('addr').value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
   await withBusy('Cattura full page', async ()=>{
     urlCheckDisabledNote();
-
     logLine('SM 1920×1240 in corso…');
     let sm1=await GET('mode=sm'+'&t='+encodeURIComponent(TOKEN||'')+'&u='+encodeURIComponent(u)+'&dim=1920x1240');
     if(!sm1.ok) throw new Error(sm1.error||'SM 1240');
@@ -307,8 +340,6 @@ function isBlank(canvas){
   return true;
 }
 $('btnSnap').onclick = async ()=>{
-  const vw=video.videoWidth, vh=video.videoHeight;
-  logLine('Click SCATTA (shareActive='+shareActive+', '+vw+'×'+vh+')');
   await withBusy('Scatto', async ()=>{
     if(!shareActive) throw new Error('Condivisione non attiva');
     urlCheckDisabledNote();
@@ -332,10 +363,9 @@ $('btnSnap').onclick = async ()=>{
     }
     imgLarge.src=c.toDataURL('image/png'); imgLarge.classList.add('hasSrc'); rect.style.display='none';
     hasShot=true;
-    enable($('btnSave'), true);
-    setUIState('shared'); // ← forza il ricalcolo UI: SALVA rimane attivo subito dopo lo scatto
+    setUIState('shared');          // <— centralizza: abilita subito “Salva”
     logLine('Scatto eseguito ('+used+') → immagine grande pronta.', true);
-  }, {restore:false}); // ← impedisce il ripristino dello stato precedente che disabilitava SALVA
+  }, {restore:false});             // <— NON ripristinare lo stato precedente
 };
 function makePayload(){
   if(!imgLarge.classList.contains('hasSrc')) return null;
@@ -360,7 +390,6 @@ $('btnSave').onclick = async ()=>{
   if(!hasShot){ alert('Fai prima uno scatto'); return; }
   await withBusy('Salvataggio scatto', async ()=>{
     urlCheckDisabledNote();
-
     const payload = await makePayload(); if(!payload){ logLine('Nessuna immagine.'); return; }
     const u=($('addr').value||'').trim();
     const label=(payload.crop?'FRAME_CROP':'FRAME_FULL');
@@ -393,7 +422,7 @@ $('btnRec').onclick = async ()=>{
 };
 $('btnStop').onclick = ()=>{ if(recorder && recording){ try{ recorder.stop(); }catch(e){ logLine('ERRORE STOP: '+e, true); } } };
 
-/* ===== asset ===== */
+/* ===== asset (deep snapshot) ===== */
 $('btnAssets').onclick = async ()=>{
   if(!SID){ alert('Avvia certificazione'); return; }
   const u=($('addr').value||'').trim(); if(!u){ alert('URL obbligatoria'); return; }
