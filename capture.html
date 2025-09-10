@@ -134,24 +134,56 @@ const thumb=$('thumb'), imgLarge=$('imgLarge'), rect=$('rect'), capWrap=$('capWr
 /* === fetch helpers === */
 async function GET(q){
   const url = APP + (APP.includes('?') ? '&' : '?') + q;
-
-  // Log prima di chiamare
   logLine('REQ → ' + url);
-
   try{
     const r = await fetch(url, {
       cache: 'no-store',
-      mode: 'cors',              // lasciamo cors
+      mode: 'cors',
       credentials: 'omit',
       redirect: 'follow',
       referrerPolicy: 'no-referrer'
     });
+    logLine('HTTP ' + r.status + ' ← ' + url);
+    if(!r.ok) throw new Error('HTTP '+r.status);
 
-    // Se il browser ha bloccato per CORS, fetch non arriva qui.
-    if(!r.ok){
-      logLine('HTTP ' + r.status + ' ← ' + url, true);
-      throw new Error('HTTP '+r.status);
+    const txt = await r.text();
+    try{
+      return JSON.parse(txt);
+    }catch(parseErr){
+      logLine('JSON parse error: ' + (parseErr.message||parseErr), true);
+      logLine('Body: ' + txt.slice(0,300), true);
+      throw new Error('Bad JSON');
     }
+  }catch(err){
+    // Qui arrivano i "TypeError: Failed to fetch" (CORS/rete)
+    logLine('FETCH ERR: '+(err && err.message ? err.message : String(err)), true);
+    throw err;
+  }
+}
+
+function GET_JSONP(q){
+  return new Promise((resolve, reject)=>{
+    const cb = '__we_cb_' + Math.random().toString(36).slice(2);
+    const src = APP + (APP.includes('?') ? '&' : '?') + q + '&callback=' + cb;
+
+    let done = false;
+    function cleanup(){
+      done = true;
+      try{ delete window[cb]; }catch(_){}
+      try{ scr.remove(); }catch(_){}
+    }
+
+    window[cb] = (data)=>{ if(done) return; cleanup(); resolve(data); };
+
+    const scr = document.createElement('script');
+    scr.src = src;
+    scr.async = true;
+    scr.onerror = ()=>{ if(done) return; cleanup(); reject(new Error('JSONP load error')); };
+    document.head.appendChild(scr);
+
+    setTimeout(()=>{ if(!done){ cleanup(); reject(new Error('JSONP timeout')); } }, 10000);
+  });
+}
 
     // Provo a leggere testo grezzo per avere errori più parlanti
     const txt = await r.text();
@@ -227,6 +259,10 @@ $('btnStart').onclick = async ()=>{
   $('addr').readOnly=true; $('addr').disabled=true; $('client').readOnly=true; $('client').disabled=true;
   logLine('Avvio certificazione…');
   await withBusy('Avvio certificazione', async ()=>{
+    // memorizzo l'URL originale inserito all'avvio (per diagnosi locale)
+window._ORIG_INPUT_URL = url;
+logLine('ORIG_URL (start) = '+window._ORIG_INPUT_URL);
+
     const host= ($('client').dataset.domain||'') || (new URL(url)).hostname.replace(/^www\./,'');
     const js=await GET('mode=start'
       +'&t='+encodeURIComponent(TOKEN||'')
@@ -271,44 +307,61 @@ $('btnShare').onclick = async ()=>{
 /* === verifyUrlOrStop === */
 async function verifyUrlOrStop(){
   const rawU = (document.getElementById('addr').value || '').trim();
-
-  // Log cliente super-esplicito PRIMA della fetch
   logLine('Verifica URL → sid='+SID+' addr="'+rawU+'"');
 
   const q = 'mode=checkUrl&sid='+encodeURIComponent(SID)+'&u='+encodeURIComponent(rawU);
-  try{
-    const js = await GET(q);
 
-    if(!js || js.ok !== true){
-      logLine('CHKURL ERR: risposta non OK dal server (ok='+(js && js.ok)+')', true);
-      if(js && js.error) logLine('CHKURL server error: '+js.error, true);
-      return false;
-    }
-
-    // Log di tutto, per l’avvocato
-    logLine('CHKURL.RAW → orig='+js.orig+' | now='+js.now);
-    logLine('CHKURL.NORM → origNorm='+js.origNorm+' | nowNorm='+js.nowNorm);
+  // helper comune per stampare i dettagli ricevuti dal server
+  function logServerCheck(js){
+    logLine('CHKURL.RAW   orig='+js.orig+' | now='+js.now);
+    logLine('CHKURL.NORM  origNorm='+js.origNorm+' | nowNorm='+js.nowNorm);
     if(js.diff){
       const parts = ['scheme','host','port','path','query','hash']
         .map(k => k+':' + (js.diff[k] ? 'DIFF' : 'OK')).join(' | ');
-      logLine('CHKURL.DIFF → '+parts);
+      logLine('CHKURL.DIFF  '+parts);
     }
-    if(js.explain) logLine('CHKURL.EXPLAIN → '+js.explain);
+    if(js.explain) logLine('CHKURL.NOTE  '+js.explain);
+  }
 
-    if(js.mismatch){
-      logLine('URL DIVERGENTE — BLOCCO OPERAZIONE', true);
+  // 1) tentativo normale via fetch
+  try{
+    const js = await GET(q);
+    if(!js || js.ok !== true){
+      logLine('CHKURL ERR: risposta non OK dal server', true);
+      if(js && js.error) logLine('Server said: '+js.error, true);
       return false;
     }
-
+    logServerCheck(js);
+    if(js.mismatch){ logLine('URL DIVERGENTE — BLOCCO', true); return false; }
     logLine('Verifica URL OK — combaciano (post-normalizzazione).');
     return true;
-
-  }catch(e){
-    // Qui ci finisci quando vedi "Failed to fetch"
-    logLine('CHKURL ERR (rete/CORS): '+(e && e.message ? e.message : String(e)), true);
-    return false;
+  }catch(fetchErr){
+    // 2) fallback JSONP (bypassa CORS): qui otteniamo comunque i dettagli
+    logLine('CHKURL: fallback JSONP (causa: '+(fetchErr && fetchErr.message || fetchErr)+')');
+    try{
+      const js = await GET_JSONP(q);
+      if(!js || js.ok !== true){
+        logLine('CHKURL(JSONP) ERR: risposta non OK', true);
+        if(js && js.error) logLine('Server said: '+js.error, true);
+        return false;
+      }
+      logServerCheck(js);
+      if(js.mismatch){ logLine('URL DIVERGENTE — BLOCCO', true); return false; }
+      logLine('Verifica URL OK (via JSONP).');
+      return true;
+    }catch(jsonpErr){
+      logLine('CHKURL(JSONP) ERR: '+(jsonpErr && jsonpErr.message || jsonpErr), true);
+      // stampo almeno la differenza locale tra "quello che abbiamo salvato allo START" e l’input attuale
+      if(window._ORIG_INPUT_URL){
+        const a = (window._ORIG_INPUT_URL||'').replace(/\/+$/,'');
+        const b = (rawU||'').replace(/\/+$/,'');
+        logLine('DIAG LOCALE → ORIG_INPUT="'+a+'" vs NOW_INPUT="'+b+'"');
+      }
+      return false;
+    }
   }
 }
+
 
 
 /* === full page === */
